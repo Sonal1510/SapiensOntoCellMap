@@ -14,24 +14,24 @@ _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Navigate up one level to the root and then into 'data'
 BASE_DATA_DIR = os.path.join(_CURRENT_DIR, '..', 'data')
 RAW_DATA_DIR = os.path.join(BASE_DATA_DIR, 'raw')
-PROCESSED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed')
+PROCESSED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed_db_dfs')
+RECOVER_ID_DATA_DIR = os.path.join(BASE_DATA_DIR, 'recovered_ids_dfs')
+PROCESSED_COMBINED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed_combined_db')
 SQLITE_DB_PATH = os.path.join(BASE_DATA_DIR, 'sapiens_ontocellmap.sqlite')
 
 # Ensure directories exist
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
+os.makedirs(RECOVER_ID_DATA_DIR, exist_ok=True)
+os.makedirs(PROCESSED_COMBINED_DATA_DIR, exist_ok=True)
+# --- Databases sources ---
 
-# --- URLs for data sources ---
-UBERON_HUMAN_VIEW_URL = "http://purl.obolibrary.org/obo/uberon/human-view.json"
-CELL_ONTOLOGY_HUMAN_VIEW_URL = "https://github.com/obophenotype/cell-ontology/releases/download/v2025-07-30/human-view.tsv"
-CELLMARKER_HUMAN_EXCEL_URL = "http://www.bio-bigdata.center/CellMarker_download_files/file/Cell_marker_Human.xlsx"
+DATABASE_SOURCE_DICTIONARY = {
+	"CELLMARKER_DB" : ["http://www.bio-bigdata.center/CellMarker_download_files/file/Cell_marker_Human.xlsx", "Cell_marker_Human.xlsx", "xlsx"],
+	"HUBMAP_DB" : ["", "hubmap_summary.csv", "csv"],
+	"CELLXGENE_DB" : ["https://cellguide.cellxgene.cziscience.com/1716401368/computational_marker_genes/marker_gene_data.json.gz", "marker_gene_data.json.gz", "json"],
+	"PANGLAO_DB" : ["https://panglaodb.se/markers/PanglaoDB_markers_27_Mar_2020.tsv.gz", "PanglaoDB_markers_27_Mar_2020.tsv.gz", "tsv"]
+}
 
-# --- Local file names after download ---
-UBERON_OBO_FILENAME = "human-view.obo"
-CELL_ONTOLOGY_TSV_FILENAME = "human-view.tsv"
-CELLMARKER_EXCEL_FILENAME = "Cell_marker_Human.xlsx"
 
-# --- Processed file names ---
-PROCESSED_UBERON_PKL = "uberon_parsed.pkl"
-PROCESSED_CELL_ONTOLOGY_PKL = "cell_ontology_parsed.pkl"
-PROCESSED_CELLMARKER_PKL = "cellmarker_parsed.pkl"
+# HuBMAP: https://humanatlas.io/asctb-tables manually download the latest version and further once parsed the summary file to get the organ csv url and download 
