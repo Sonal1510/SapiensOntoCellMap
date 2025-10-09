@@ -3,7 +3,7 @@
 Author : Sonal Rashmi
 Date   : 2025-10-03
 Description :
-Marker enrichment analysis pipeline for spatial DEGs per cluster.
+Marker enrichment analysis pipeline for spatial or scRNA-seq DEGs per cluster.
 """
 
 import pandas as pd
@@ -26,6 +26,7 @@ class MarkerEnrichmentTest:
         self,
         deg_file,
         marker_db_dict,
+        deg_file_type='spatial', 
         p_val_thresh=0.05,
         log2fc_thresh=1.0,
         mean_counts_thresh=0,
@@ -37,6 +38,7 @@ class MarkerEnrichmentTest:
         Args:
             deg_file (str): Path to the CSV file containing differentially expressed genes.
             marker_db_dict (dict): Dictionary with cell types as keys and lists of marker genes as values.
+            deg_file_type (str): Type of DEG file, either 'spatial' (wide format) or 'scrna' (long format).
             p_val_thresh (float): Adjusted p-value threshold for filtering significant genes.
             log2fc_thresh (float): Log2 fold change threshold for filtering significant genes.
             mean_counts_thresh (float): Mean counts threshold for filtering significant genes.
@@ -45,7 +47,8 @@ class MarkerEnrichmentTest:
         if not deg_file or not os.path.exists(deg_file):
             raise FileNotFoundError(f"DEG file not found at: {deg_file}")
 
-        self.deg_df = pd.read_csv(deg_file)
+        self.raw_deg_df = pd.read_csv(deg_file)
+        self.deg_file_type = deg_file_type
         self.marker_dict_clean = {
             str(k).strip(): [str(g).strip() for g in set(v) if pd.notna(g)]
             for k, v in marker_db_dict.items()
@@ -54,15 +57,95 @@ class MarkerEnrichmentTest:
         self.log2fc_thresh = log2fc_thresh
         self.mean_counts_thresh = mean_counts_thresh
         self.top_genes = top_genes
-        self.background_genes = set(self.deg_df["Feature Name"].unique())
+        
+        # Normalize the DEG dataframe into a consistent long format
+        self.deg_df_long = self._normalize_deg_df()
+        
+        # Background genes are all unique genes present in the normalized table
+        self.background_genes = set(self.deg_df_long["Feature Name"].unique())
         self.cluster_markers = {}
         self.results_ = pd.DataFrame()
+
+    def _normalize_deg_df(self):
+        """
+        Normalizes the input DEG dataframe (wide or long) into a consistent long format.
+        """
+        logging.info(f"Normalizing DEG file with format: '{self.deg_file_type}'")
+        if self.deg_file_type == 'scrna':
+            # Assumes 'long' format based on the user's image
+            # Columns: p_val, avg_log2FC, pct.1, pct.2, p_val_adj, cluster, gene
+            df = self.raw_deg_df.copy()
+            # Rename columns to a standard internal representation
+            rename_map = {
+                'gene': 'Feature Name',
+                'cluster': 'Cluster',
+                'p_val_adj': 'Adjusted p value',
+                'avg_log2FC': 'Log2 fold change',
+                # Mean Counts is not present in the provided scRNAseq example, so we'll fill with 0
+            }
+            df.rename(columns=rename_map, inplace=True)
+            
+            # Ensure required columns exist
+            if 'Feature Name' not in df.columns or 'Cluster' not in df.columns:
+                raise ValueError("scRNA-seq DEG file must contain 'gene' and 'cluster' columns.")
+
+            # Add a placeholder for mean counts if it doesn't exist
+            if 'Mean Counts' not in df.columns:
+                 df['Mean Counts'] = 0
+
+            # Ensure cluster names are strings
+            df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
+            
+            return df[['Feature Name', 'Cluster', 'Adjusted p value', 'Log2 fold change', 'Mean Counts']]
+
+        elif self.deg_file_type == 'spatial':
+            # Assumes 'wide' format and converts to 'long'
+            df = self.raw_deg_df.copy()
+            id_vars = [c for c in ['Feature ID', 'Feature Name'] if c in df.columns]
+            if not id_vars:
+                raise ValueError("Spatial DEG file must contain 'Feature ID' or 'Feature Name'.")
+            
+            # Melt the dataframe
+            df_long = pd.melt(df, id_vars=id_vars, var_name='Metric', value_name='Value')
+            
+            # Extract Cluster and Metric Type
+            df_long[['Cluster', 'Metric Type']] = df_long['Metric'].str.extract(r'(Cluster \d+)\s(.*)')
+            df_long.dropna(subset=['Cluster', 'Metric Type'], inplace=True)
+
+            # Pivot to get metrics as columns
+            df_pivot = df_long.pivot_table(
+                index=id_vars + ['Cluster'],
+                columns='Metric Type',
+                values='Value',
+                aggfunc='first'
+            ).reset_index()
+            df_pivot.columns.name = None
+            
+            # Rename for consistency
+            df_pivot.rename(columns={
+                'Log2 fold change': 'Log2 fold change',
+                'Adjusted p value': 'Adjusted p value',
+                'Mean Counts': 'Mean Counts'
+            }, inplace=True)
+            
+            # Ensure required columns are numeric
+            for col in ['Adjusted p value', 'Log2 fold change', 'Mean Counts']:
+                 if col in df_pivot.columns:
+                    df_pivot[col] = pd.to_numeric(df_pivot[col], errors='coerce')
+                 else: # If a column is missing (like Mean Counts), add it
+                    df_pivot[col] = 0
+            
+            return df_pivot
+
+        else:
+            raise ValueError(f"Unknown deg_file_type: '{self.deg_file_type}'. Choose 'spatial' or 'scrna'.")
+
 
     def fit(self):
         """
         Runs the full enrichment analysis pipeline.
         """
-        logging.info("Filtering DEGs...")
+        logging.info("Filtering DEGs from normalized dataframe...")
         self.cluster_markers = self._filter_and_extract_degs()
         logging.info("Running hypergeometric enrichment test...")
         self.results_ = self._run_hypergeometric_test()
@@ -72,61 +155,35 @@ class MarkerEnrichmentTest:
 
     def _filter_and_extract_degs(self):
         """
-        Filters and extracts significant DEGs for each cluster based on defined thresholds.
+        Filters and extracts significant DEGs for each cluster from the normalized long-format DataFrame.
         """
-        cluster_cols = [
-            c for c in self.deg_df.columns if "Cluster" in c and "Adjusted p value" in c
-        ]
-        if not cluster_cols:
-            logging.error(
-                "No valid 'Cluster X Adjusted p value' columns found in DEG file."
-            )
-            return {}
-
-        cluster_ids = sorted(
-            [int(re.search(r"(\d+)", c).group(1)) for c in cluster_cols]
-        )
         cluster_markers_dict = {}
-        for i in cluster_ids:
-            p_col = f"Cluster {i} Adjusted p value"
-            fc_col = f"Cluster {i} Log2 fold change"
-            mc_col = f"Cluster {i} Mean Counts"
-
-            required_cols = [p_col, fc_col]
-            # Only require mean counts column if a threshold is set
-            if self.mean_counts_thresh > 0:
-                required_cols.append(mc_col)
-
-            if not all(col in self.deg_df.columns for col in required_cols):
-                logging.warning(
-                    f"Skipping Cluster {i} due to missing required columns ({', '.join(required_cols)})."
-                )
-                continue
-
+        
+        # The dataframe is already in a long, tidy format, so we can group by cluster
+        for cluster_id, cluster_df in self.deg_df_long.groupby('Cluster'):
+            
             # Build the filter mask
-            mask = (self.deg_df[p_col] < self.p_val_thresh) & (
-                self.deg_df[fc_col] > self.log2fc_thresh
-            )
+            mask = (cluster_df['Adjusted p value'] < self.p_val_thresh) & \
+                   (cluster_df['Log2 fold change'] > self.log2fc_thresh)
 
-            if self.mean_counts_thresh > 0:
-                mask &= self.deg_df[mc_col] > self.mean_counts_thresh
+            if self.mean_counts_thresh > 0 and 'Mean Counts' in cluster_df.columns:
+                mask &= (cluster_df['Mean Counts'] > self.mean_counts_thresh)
 
-            sig_genes_df = self.deg_df[mask].copy()
+            sig_genes_df = cluster_df[mask].copy()
 
             if self.top_genes and isinstance(self.top_genes, int):
                 # Sort by Log2 fold change (descending) to get the "top" genes
                 sig_genes_df = sig_genes_df.sort_values(
-                    by=fc_col, ascending=False
+                    by='Log2 fold change', ascending=False
                 ).head(self.top_genes)
 
             genes = sig_genes_df["Feature Name"].dropna().astype(str).unique().tolist()
-            cluster_markers_dict[f"Cluster {i}"] = genes
+            cluster_markers_dict[cluster_id] = genes
+            
         return cluster_markers_dict
 
     def _run_hypergeometric_test(self):
-        """
-        Performs the hypergeometric test for each cluster against each cell type marker list.
-        """
+        # This method does not need changes as it operates on the output of _filter_and_extract_degs
         N = len(self.background_genes)
         all_results_list = []
         for cluster_id, cluster_genes in self.cluster_markers.items():
@@ -146,7 +203,6 @@ class MarkerEnrichmentTest:
                 if k == 0:
                     continue
 
-                # p-value for enrichment: P(X >= k)
                 p_val = hypergeom.sf(k - 1, N, K, n)
                 enrichment = (k / n) / (K / N) if K > 0 and n > 0 else 0
                 results.append(
@@ -162,9 +218,7 @@ class MarkerEnrichmentTest:
 
             if results:
                 df = pd.DataFrame(results)
-                df["adj_p_value"] = multi.multipletests(df["p_value"], method="fdr_bh")[
-                    1
-                ]
+                df["adj_p_value"] = multi.multipletests(df["p_value"], method="fdr_bh")[1]
                 all_results_list.append(df)
 
         if not all_results_list:
@@ -176,14 +230,7 @@ class MarkerEnrichmentTest:
     def plot_results(
         self, p_val_cutoff=0.05, value_col="Enrichment Ratio", top_n_per_cluster=10
     ):
-        """
-        Generates a dot plot of the enrichment results.
-
-        Args:
-            p_val_cutoff (float): P-value cutoff for results to be plotted.
-            value_col (str): Column to use for color scale (e.g., 'Enrichment Ratio').
-            top_n_per_cluster (int): Max number of cell types to show per cluster, ranked by p-value.
-        """
+        # This method does not need changes
         if self.results_.empty:
             logging.warning("No results to plot.")
             return
@@ -195,7 +242,6 @@ class MarkerEnrichmentTest:
             )
             return
 
-        # Select top N results per cluster to avoid cluttered plots
         plot_df = (
             plot_df.groupby("Cluster")
             .apply(lambda x: x.nsmallest(top_n_per_cluster, "adj_p_value"))
@@ -206,7 +252,6 @@ class MarkerEnrichmentTest:
             logging.warning(f"No results remain after selecting top {top_n_per_cluster} per cluster.")
             return
 
-        # Create -log10(p-value) for better color visualization
         plot_df["-log10(adj_p_value)"] = -np.log10(plot_df["adj_p_value"])
 
         plt.figure(
