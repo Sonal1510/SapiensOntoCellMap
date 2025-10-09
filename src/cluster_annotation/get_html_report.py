@@ -87,13 +87,13 @@ def plot_dynamic_heatmap_with_bars(
 
     if cluster_axes and not heatmap_df.empty:
         if heatmap_df.shape[1] > 1:
-            # --- CHANGE 1: Use correlation metric for better biological clustering ---
-            col_linkage = linkage(heatmap_df.T, method='ward', metric='correlation')
+            # --- FIX: Use 'average' linkage method with 'correlation' metric ---
+            col_linkage = linkage(heatmap_df.T, method='average', metric='correlation')
             col_dendrogram = dendrogram(col_linkage, no_plot=True, labels=heatmap_df.columns)
             heatmap_df = heatmap_df[col_dendrogram['ivl']]
         if heatmap_df.shape[0] > 1:
-            # --- CHANGE 1: Use correlation metric for better biological clustering ---
-            row_linkage = linkage(heatmap_df, method='ward', metric='correlation')
+            # --- FIX: Use 'average' linkage method with 'correlation' metric ---
+            row_linkage = linkage(heatmap_df, method='average', metric='correlation')
             row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=heatmap_df.index)
             heatmap_df = heatmap_df.reindex(row_dendrogram['ivl'])
 
@@ -114,7 +114,7 @@ def plot_dynamic_heatmap_with_bars(
         fontsize=14, weight='bold', pad=20
     )
     ax_heat.set_xlabel('Annotated Cell Type', fontsize=12, labelpad=10)
-    ax_heat.set_ylabel('')
+    ax_heat.set_ylabel('Cluster', fontsize=12)
     plt.setp(ax_heat.get_xticklabels(), rotation=90, ha='right', rotation_mode='anchor', fontsize=10)
 
     y_pos = np.arange(len(heatmap_df.index))
@@ -139,11 +139,12 @@ def plot_dynamic_heatmap_with_bars(
     img_base64 = base64.b64encode(buf.read()).decode('utf-8')
     return f'<img src="data:image/png;base64,{img_base64}" alt="Enrichment Heatmap" style="width:100%; height:auto;">'
 
+
+# The rest of the file is unchanged from the previous version
 # ==============================================================================
 # DEG BROWSER PLOTS & TABLES
 # ==============================================================================
 def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
-    # This function remains the same as the previous version
     if 'cluster' in deg_df.columns and 'gene' in deg_df.columns:
         logging.info("Input DEG dataframe appears to be in long format. Standardizing columns.")
         df_reshaped = deg_df.copy()
@@ -167,63 +168,35 @@ def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
     return df_reshaped
 
 def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
-    """
-    Generate interactive violin plots for adj p-value, log2FC, and mean counts per cluster.
-    Log2FC and Mean Counts plots now use a logarithmic y-axis.
-    A threshold line is added for Mean Counts.
-    """
     filtered_deg_df = deg_df_reshaped[
         (deg_df_reshaped['adj_p_value'] < p_val_thresh) & (abs(deg_df_reshaped['log2FC']) >= log2fc_thresh)
     ].copy()
-
     if filtered_deg_df.empty:
         return "<h3>DEG Distributions</h3><p>No significant DEGs found with the given thresholds.</p>"
-
     filtered_deg_df['neg_log10_p_value'] = -np.log10(filtered_deg_df['adj_p_value'] + _EPSILON)
     filtered_deg_df['abs_log2FC'] = filtered_deg_df['log2FC'].abs()
-    
     hover_template = '<b>%{customdata[0]}</b><br>Cluster: %{x}<br>Adj p-value: %{customdata[1]:.2e}<br>Log2FC: %{customdata[2]:.2f}<br>Mean Counts: %{customdata[3]:.2f}<extra></extra>'
-
     sorted_clusters = sorted(filtered_deg_df['Cluster'].unique(), key=natural_sort_key)
     filtered_deg_df['Cluster'] = pd.Categorical(filtered_deg_df['Cluster'], categories=sorted_clusters, ordered=True)
     filtered_deg_df.sort_values('Cluster', inplace=True)
-    
-    # p-value plot (y-axis is already a log-like scale)
-    fig_p_val = px.violin(filtered_deg_df, x='Cluster', y='neg_log10_p_value', box=True, points=False,
-                            title='Adjusted p-value Distribution', color='Cluster',
-                            custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'])
+    fig_p_val = px.violin(filtered_deg_df, x='Cluster', y='neg_log10_p_value', box=True, points=False, title='Adjusted p-value Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'])
     fig_p_val.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
     fig_p_val.add_hline(y=-np.log10(p_val_thresh), line_dash="dash", line_color="red", annotation_text=f"p-value threshold = {p_val_thresh}", annotation_position="bottom right")
     fig_p_val.update_layout(xaxis_title='', yaxis_title='-log₁₀(Adjusted p-value)')
-
-    # --- CHANGE 2: Add log_y=True for exponential y-axis ---
-    fig_log2fc = px.violin(filtered_deg_df, x='Cluster', y='abs_log2FC', box=True, points=False,
-                            title='Absolute Log₂ Fold Change Distribution', color='Cluster',
-                            custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'],
-                            log_y=True)
+    fig_log2fc = px.violin(filtered_deg_df, x='Cluster', y='abs_log2FC', box=True, points=False, title='Absolute Log₂ Fold Change Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'], log_y=True)
     fig_log2fc.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
     fig_log2fc.add_hline(y=log2fc_thresh, line_dash="dash", line_color="red", annotation_text=f"log2FC threshold = {log2fc_thresh}", annotation_position="bottom right")
     fig_log2fc.update_layout(xaxis_title='', yaxis_title='Absolute Log₂ Fold Change (Log Scale)')
-    
     p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn')
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
-    
     mean_counts_html = ""
     if 'mean_counts' in filtered_deg_df.columns and filtered_deg_df['mean_counts'].sum() > 1e-6:
-        # --- CHANGE 2: Add log_y=True for exponential y-axis ---
-        fig_mean_counts = px.violin(filtered_deg_df, x='Cluster', y='mean_counts', box=True, points=False,
-                                      title='Mean Counts Distribution', color='Cluster',
-                                      custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'],
-                                      log_y=True)
+        fig_mean_counts = px.violin(filtered_deg_df, x='Cluster', y='mean_counts', box=True, points=False, title='Mean Counts Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'], log_y=True)
         fig_mean_counts.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
-        
-        # --- CHANGE 3: Add horizontal line for mean counts threshold ---
         if mean_counts_thresh > 0:
             fig_mean_counts.add_hline(y=mean_counts_thresh, line_dash="dash", line_color="red", annotation_text=f"mean counts threshold = {mean_counts_thresh:.2f}", annotation_position="bottom right")
-
         fig_mean_counts.update_layout(xaxis_title='Cluster', yaxis_title='Mean Counts (Log Scale)')
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
-
     combined_html = f"""
     <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
     <div style="text-align: center;"><h3>Absolute Log₂ Fold Change Distribution</h3>{log2fc_html}</div>
@@ -234,13 +207,10 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         """
     return combined_html
 
-
 def create_deg_tables_html(deg_df: pd.DataFrame, cluster_markers: Dict[str, List[str]], p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
     deg_df_reshaped = _reshape_deg_df(deg_df)
-    # Pass the new mean_counts_thresh parameter
     dist_plots_html = create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_counts_thresh)
     bar_plot_html = plot_deg_counts_barchart(cluster_markers)
-    # ... (rest of the function is unchanged)
     dropdown_parts = ['<label for="cluster_select"><b>Select a Cluster to view its DEGs:</b></label>', '<select id="cluster_select" onchange="showTable(this.value)">']
     cluster_names = sorted(cluster_markers.keys(), key=natural_sort_key)
     dropdown_parts.append('<option value="">--Select--</option>')
@@ -268,9 +238,7 @@ def create_deg_tables_html(deg_df: pd.DataFrame, cluster_markers: Dict[str, List
         table_parts.append(f'<div id="deg_table_{sanitized_cluster_name}" class="deg-table-container" style="display:none;"><h4>DEGs for {cluster}</h4>{table_html}</div>')
     return dist_plots_html + bar_plot_html + ''.join(dropdown_parts) + ''.join(table_parts)
 
-# The rest of the file (plot_deg_counts_barchart, generate_html_report) remains unchanged.
 def plot_deg_counts_barchart(cluster_markers: Dict[str, List[str]]) -> str:
-    # ... (unchanged)
     if not cluster_markers: return ""
     deg_counts = pd.Series({cluster: len(genes) for cluster, genes in cluster_markers.items()})
     deg_counts = deg_counts[deg_counts > 0]
@@ -283,7 +251,6 @@ def plot_deg_counts_barchart(cluster_markers: Dict[str, List[str]]) -> str:
     return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False)}<hr style="margin: 25px 0;">'
 
 def generate_html_report(sample_name, output_path, sig_results_df, plots_html, deg_table_html, params):
-    # ... (unchanged)
     df_for_html = sig_results_df.copy()
     if 'Cluster' in df_for_html.columns:
         unique_clusters = df_for_html['Cluster'].unique()

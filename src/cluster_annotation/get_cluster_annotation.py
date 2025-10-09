@@ -13,7 +13,7 @@ import argparse
 import pandas as pd
 # Assuming config.py and other scripts are in the python path
 # from config import PROCESSED_COMBINED_DATA_DIR
-PROCESSED_COMBINED_DATA_DIR = "." # Placeholder if config is not available
+PROCESSED_COMBINED_DATA_DIR = "../spatial_annotator/SapiensOntoCellMap/data/processed_combined_db/" # Placeholder if config is not available
 from get_marker_enrichment_test import MarkerEnrichmentTest
 from get_html_report import (
     plot_dynamic_heatmap_with_bars,
