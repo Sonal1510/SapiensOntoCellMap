@@ -246,7 +246,6 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
             range=[range_min, range_max]
         )
     )
-    # --- CHANGE: Removed negative threshold line and updated annotation text ---
     fig_log2fc.add_hline(
         y=symlog_transform(log2fc_thresh), line_dash="dash", line_color="red",
         annotation_text=f"Upregulated Log₂FC threshold = {log2fc_thresh}", annotation_position="bottom right"
@@ -254,54 +253,85 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
 
     p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn')
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
-
-    # --- Plot 3: Mean Counts (log scale with custom range) ---
+    
+    # ==========================================================================
+    # START: REVISED MEAN COUNTS PLOT
+    # ==========================================================================
     mean_counts_html = ""
     if 'mean_counts' in filtered_deg_df.columns and filtered_deg_df['mean_counts'].sum() > 1e-6:
-        fig_mean_counts = px.violin(
-            filtered_deg_df, x='Cluster', y='mean_counts', box=True, points='all',
-            title='Mean Counts Distribution', color='Cluster',
+        # --- Create Plot: Use a box plot for better readability with outliers ---
+        fig_mean_counts = px.box(
+            filtered_deg_df,
+            x='Cluster',
+            y='mean_counts',
+            color='Cluster',
+            points='outliers',  # Show only outliers, not all points
             custom_data=custom_data_cols
         )
-        fig_mean_counts.update_traces(
-            hovertemplate=hover_template, box_visible=True, meanline_visible=True,
-            points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
-        )
         
-        # --- CHANGE: Updated y-axis logic for Mean Counts plot ---
+        # --- Update Traces: Customize hover info and marker style ---
+        fig_mean_counts.update_traces(
+            hovertemplate=hover_template,
+            marker=dict(opacity=0.7, size=4)  # Style for outlier points
+        )
+
+        # --- Y-axis Logic: Set a robust log-scale range and clean tick labels ---
         counts_floor = 1e-4  # A reasonable floor for expression counts
         non_zero_counts = filtered_deg_df['mean_counts'][filtered_deg_df['mean_counts'] > 0]
-        yaxis_counts_dict = dict(
-            title_text='Mean Counts (Log Scale)', 
-            type="log",
-            tickformat=".g" # Use general format for ticks
-        )
         
-        if not non_zero_counts.empty:
-            # Use quantiles to set the y-axis range, making it robust to extreme outliers
-            q_low = non_zero_counts.quantile(0.01)
-            q_high = non_zero_counts.quantile(0.99)
-            
-            # Ensure the range is reasonable
-            min_for_display = max(q_low, counts_floor)
-            max_for_display = q_high
-            
-            # Add some padding to the range
-            range_min = min_for_display / 2
-            range_max = max_for_display * 2
-            
-            if range_max > range_min: # Ensure valid range
-                 yaxis_counts_dict['range'] = [np.log10(range_min), np.log10(range_max)]
+        yaxis_counts_dict = dict(
+            title_text='Mean Counts (Log Scale)',
+            type="log",
+        )
 
-        fig_mean_counts.update_layout(xaxis_title='Cluster', yaxis=yaxis_counts_dict)
+        if not non_zero_counts.empty:
+            # Use quantiles to set a y-axis range robust to extreme outliers
+            q_low = non_zero_counts.quantile(0.005) # Use 0.5 percentile
+            q_high = non_zero_counts.quantile(0.995) # Use 99.5 percentile
+            
+            min_for_display = max(q_low, counts_floor)
+            
+            # Add padding to the range
+            range_min_val = min_for_display * 0.5
+            range_max_val = q_high * 2.0
+            
+            if range_max_val > range_min_val:
+                yaxis_counts_dict['range'] = [np.log10(range_min_val), np.log10(range_max_val)]
+
+                # --- Generate clean, publication-ready tick marks as powers of 10 ---
+                min_power = np.floor(np.log10(range_min_val))
+                max_power = np.ceil(np.log10(range_max_val))
+                
+                tick_values = [10**i for i in range(int(min_power), int(max_power) + 1)]
+                tick_values = [v for v in tick_values if range_min_val <= v <= range_max_val]
+
+                if tick_values:
+                    yaxis_counts_dict['tickvals'] = tick_values
+                    yaxis_counts_dict['ticktext'] = [f'{v:g}' for v in tick_values]
+
+        # --- Layout Update: Apply publication-quality aesthetics ---
+        fig_mean_counts.update_layout(
+            title_text='Distribution of Mean Gene Counts per Cluster',
+            xaxis_title='Cluster',
+            yaxis=yaxis_counts_dict,
+            showlegend=False,  # Legend is redundant with x-axis colors
+            template='simple_white',
+            font=dict(size=12),
+            title=dict(x=0.5, font=dict(size=16)) # Center title
+        )
         
         if mean_counts_thresh > 0:
             fig_mean_counts.add_hline(
                 y=mean_counts_thresh, line_dash="dash", line_color="red",
-                annotation_text=f"mean counts threshold = {mean_counts_thresh:.2f}", annotation_position="bottom right"
+                annotation_text=f"Mean counts threshold = {mean_counts_thresh:.2f}",
+                annotation_position="bottom right"
             )
+            
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
-
+    # ==========================================================================
+    # END: REVISED MEAN COUNTS PLOT
+    # ==========================================================================
+    
     combined_html = f"""
     <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
     <div style="text-align: center;"><h3>Log2 Fold Change Distribution</h3>{log2fc_html}</div>
@@ -311,6 +341,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         <div style="text-align: center;"><h3>Mean Counts Distribution</h3>{mean_counts_html}</div>
         """
     return combined_html
+
 
 def create_deg_tables_html(deg_df: pd.DataFrame, cluster_markers: Dict[str, List[str]], p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
     deg_df_reshaped = _reshape_deg_df(deg_df)
@@ -373,7 +404,6 @@ def generate_html_report(sample_name, output_path, sig_results_df, plots_html, d
         df_for_html['Full Gene List'] = df_for_html['Overlapping Genes']
         df_for_html['Overlapping Genes'] = df_for_html['Full Gene List'].apply(truncate_for_table)
         df_for_html.insert(0, '', '')
-    # --- CHANGE: Updated HTML template string for clarity ---
     template_str = """
     <!DOCTYPE html>
     <html><head><title>{{ sample_name }} Report</title>
