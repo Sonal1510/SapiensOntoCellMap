@@ -87,12 +87,10 @@ def plot_dynamic_heatmap_with_bars(
 
     if cluster_axes and not heatmap_df.empty:
         if heatmap_df.shape[1] > 1:
-            # --- FIX: Use 'average' linkage method with 'correlation' metric ---
             col_linkage = linkage(heatmap_df.T, method='average', metric='correlation')
             col_dendrogram = dendrogram(col_linkage, no_plot=True, labels=heatmap_df.columns)
             heatmap_df = heatmap_df[col_dendrogram['ivl']]
         if heatmap_df.shape[0] > 1:
-            # --- FIX: Use 'average' linkage method with 'correlation' metric ---
             row_linkage = linkage(heatmap_df, method='average', metric='correlation')
             row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=heatmap_df.index)
             heatmap_df = heatmap_df.reindex(row_dendrogram['ivl'])
@@ -139,8 +137,6 @@ def plot_dynamic_heatmap_with_bars(
     img_base64 = base64.b64encode(buf.read()).decode('utf-8')
     return f'<img src="data:image/png;base64,{img_base64}" alt="Enrichment Heatmap" style="width:100%; height:auto;">'
 
-
-# The rest of the file is unchanged from the previous version
 # ==============================================================================
 # DEG BROWSER PLOTS & TABLES
 # ==============================================================================
@@ -164,42 +160,151 @@ def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
     if 'mean_counts' not in df_reshaped.columns: df_reshaped['mean_counts'] = 0
     for col, dtype in {'adj_p_value': 'float', 'log2FC': 'float', 'mean_counts': 'float'}.items():
         if col in df_reshaped.columns: df_reshaped[col] = pd.to_numeric(df_reshaped[col], errors='coerce')
-    df_reshaped['mean_counts'].fillna(0, inplace=True)
+    df_reshaped['mean_counts'] = df_reshaped['mean_counts'].fillna(0)
     return df_reshaped
 
 def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
-    filtered_deg_df = deg_df_reshaped[
-        (deg_df_reshaped['adj_p_value'] < p_val_thresh) & (abs(deg_df_reshaped['log2FC']) >= log2fc_thresh)
-    ].copy()
+    filtered_deg_df = deg_df_reshaped
     if filtered_deg_df.empty:
         return "<h3>DEG Distributions</h3><p>No significant DEGs found with the given thresholds.</p>"
-    filtered_deg_df['neg_log10_p_value'] = -np.log10(filtered_deg_df['adj_p_value'] + _EPSILON)
-    filtered_deg_df['abs_log2FC'] = filtered_deg_df['log2FC'].abs()
-    hover_template = '<b>%{customdata[0]}</b><br>Cluster: %{x}<br>Adj p-value: %{customdata[1]:.2e}<br>Log2FC: %{customdata[2]:.2f}<br>Mean Counts: %{customdata[3]:.2f}<extra></extra>'
+
+    # Sort clusters naturally for consistent plot order
     sorted_clusters = sorted(filtered_deg_df['Cluster'].unique(), key=natural_sort_key)
     filtered_deg_df['Cluster'] = pd.Categorical(filtered_deg_df['Cluster'], categories=sorted_clusters, ordered=True)
     filtered_deg_df.sort_values('Cluster', inplace=True)
-    fig_p_val = px.violin(filtered_deg_df, x='Cluster', y='neg_log10_p_value', box=True, points=False, title='Adjusted p-value Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'])
-    fig_p_val.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
-    fig_p_val.add_hline(y=-np.log10(p_val_thresh), line_dash="dash", line_color="red", annotation_text=f"p-value threshold = {p_val_thresh}", annotation_position="bottom right")
-    fig_p_val.update_layout(xaxis_title='', yaxis_title='-log₁₀(Adjusted p-value)')
-    fig_log2fc = px.violin(filtered_deg_df, x='Cluster', y='abs_log2FC', box=True, points=False, title='Absolute Log₂ Fold Change Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'], log_y=True)
-    fig_log2fc.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
-    fig_log2fc.add_hline(y=log2fc_thresh, line_dash="dash", line_color="red", annotation_text=f"log2FC threshold = {log2fc_thresh}", annotation_position="bottom right")
-    fig_log2fc.update_layout(xaxis_title='', yaxis_title='Absolute Log₂ Fold Change (Log Scale)')
+
+    custom_data_cols = ['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts']
+    hover_template = '<b>%{customdata[0]}</b><br>Cluster: %{x}<br>Adj p-value: %{customdata[1]:.2e}<br>Log2FC: %{customdata[2]:.2f}<br>Mean Counts: %{customdata[3]:.2f}<extra></extra>'
+
+    # --- Plot 1: Adjusted p-value (Log Scale with Visual Floor) ---
+    fig_p_val = px.violin(
+        filtered_deg_df, x='Cluster', y='adj_p_value', box=True, points='all',
+        title='Adjusted p-value Distribution', color='Cluster',
+        custom_data=custom_data_cols
+    )
+    fig_p_val.update_traces(
+        hovertemplate=hover_template, box_visible=True, meanline_visible=True,
+        points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
+    )
+    
+    # Set a visual floor to prevent extreme outliers from crushing the y-axis scale,
+    # which allows the shape of the main distribution to be visible.
+    p_val_floor = 1e-100
+    non_zero_pvals = filtered_deg_df['adj_p_value'][filtered_deg_df['adj_p_value'] > 0]
+    yaxis_pval_dict = dict(
+        title_text='Adjusted p-value (Log Scale)',
+        type="log",
+        tickformat=".1e"
+    )
+    if not non_zero_pvals.empty:
+        min_pval_for_display = max(non_zero_pvals.min(), p_val_floor)
+        max_pval_range = non_zero_pvals.max() + 10
+        yaxis_pval_dict['range'] = [np.log10(min_pval_for_display), np.log10(max_pval_range)]
+
+    fig_p_val.update_layout(xaxis_title='', yaxis=yaxis_pval_dict)
+    fig_p_val.add_hline(
+        y=p_val_thresh, line_dash="dash", line_color="red",
+        annotation_text=f"p-value threshold = {p_val_thresh}", annotation_position="top left"
+    )
+
+    # --- Plot 2: Log2 Fold Change (Manual Symlog with Wider Linear Range) ---
+    # Increased C to 1.0 to make the linear region (-1 to 1) wider, improving visibility for smaller fold changes.
+    C = 1.0
+    symlog_transform = lambda x: np.sign(x) * np.log1p(np.abs(x / C))
+    filtered_deg_df['log2FC_transformed'] = symlog_transform(filtered_deg_df['log2FC'])
+
+    fig_log2fc = px.violin(
+        filtered_deg_df, x='Cluster', y='log2FC_transformed', box=True, points='all',
+        title='Log2 Fold Change Distribution', color='Cluster',
+        custom_data=custom_data_cols
+    )
+    fig_log2fc.update_traces(
+        hovertemplate=hover_template, box_visible=True, meanline_visible=True,
+        points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
+    )
+    
+    max_abs_val = filtered_deg_df['log2FC'].abs().max()
+    tick_values_orig = [0]
+    if max_abs_val > 0 and log2fc_thresh > 0:
+        positive_ticks = [10**i for i in range(int(np.floor(np.log10(log2fc_thresh))), int(np.ceil(np.log10(max_abs_val)))+1)]
+        tick_values_orig.extend(p for p in positive_ticks if p > 0)
+        tick_values_orig.extend([-p for p in positive_ticks if p > 0])
+    tick_values_orig = sorted(list(set(tick_values_orig)))
+    tick_values_transformed = [symlog_transform(v) for v in tick_values_orig]
+    
+    min_fc = filtered_deg_df['log2FC'].min()
+    max_fc = filtered_deg_df['log2FC'].max()
+    range_min = symlog_transform(min_fc - 0.1)
+    range_max = symlog_transform(max_fc + 1)
+    
+    fig_log2fc.update_layout(
+        xaxis_title='',
+        yaxis=dict(
+            title_text='Log₂ Fold Change (Symlog Scale)',
+            tickvals=tick_values_transformed,
+            ticktext=[f"{v:g}" for v in tick_values_orig],
+            range=[range_min, range_max]
+        )
+    )
+    # --- CHANGE: Removed negative threshold line and updated annotation text ---
+    fig_log2fc.add_hline(
+        y=symlog_transform(log2fc_thresh), line_dash="dash", line_color="red",
+        annotation_text=f"Upregulated Log₂FC threshold = {log2fc_thresh}", annotation_position="bottom right"
+    )
+
     p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn')
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
+
+    # --- Plot 3: Mean Counts (log scale with custom range) ---
     mean_counts_html = ""
     if 'mean_counts' in filtered_deg_df.columns and filtered_deg_df['mean_counts'].sum() > 1e-6:
-        fig_mean_counts = px.violin(filtered_deg_df, x='Cluster', y='mean_counts', box=True, points=False, title='Mean Counts Distribution', color='Cluster', custom_data=['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts'], log_y=True)
-        fig_mean_counts.update_traces(hovertemplate=hover_template, box_visible=True, meanline_visible=True)
+        fig_mean_counts = px.violin(
+            filtered_deg_df, x='Cluster', y='mean_counts', box=True, points='all',
+            title='Mean Counts Distribution', color='Cluster',
+            custom_data=custom_data_cols
+        )
+        fig_mean_counts.update_traces(
+            hovertemplate=hover_template, box_visible=True, meanline_visible=True,
+            points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
+        )
+        
+        # --- CHANGE: Updated y-axis logic for Mean Counts plot ---
+        counts_floor = 1e-4  # A reasonable floor for expression counts
+        non_zero_counts = filtered_deg_df['mean_counts'][filtered_deg_df['mean_counts'] > 0]
+        yaxis_counts_dict = dict(
+            title_text='Mean Counts (Log Scale)', 
+            type="log",
+            tickformat=".g" # Use general format for ticks
+        )
+        
+        if not non_zero_counts.empty:
+            # Use quantiles to set the y-axis range, making it robust to extreme outliers
+            q_low = non_zero_counts.quantile(0.01)
+            q_high = non_zero_counts.quantile(0.99)
+            
+            # Ensure the range is reasonable
+            min_for_display = max(q_low, counts_floor)
+            max_for_display = q_high
+            
+            # Add some padding to the range
+            range_min = min_for_display / 2
+            range_max = max_for_display * 2
+            
+            if range_max > range_min: # Ensure valid range
+                 yaxis_counts_dict['range'] = [np.log10(range_min), np.log10(range_max)]
+
+        fig_mean_counts.update_layout(xaxis_title='Cluster', yaxis=yaxis_counts_dict)
+        
         if mean_counts_thresh > 0:
-            fig_mean_counts.add_hline(y=mean_counts_thresh, line_dash="dash", line_color="red", annotation_text=f"mean counts threshold = {mean_counts_thresh:.2f}", annotation_position="bottom right")
-        fig_mean_counts.update_layout(xaxis_title='Cluster', yaxis_title='Mean Counts (Log Scale)')
+            fig_mean_counts.add_hline(
+                y=mean_counts_thresh, line_dash="dash", line_color="red",
+                annotation_text=f"mean counts threshold = {mean_counts_thresh:.2f}", annotation_position="bottom right"
+            )
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
+
     combined_html = f"""
     <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
-    <div style="text-align: center;"><h3>Absolute Log₂ Fold Change Distribution</h3>{log2fc_html}</div>
+    <div style="text-align: center;"><h3>Log2 Fold Change Distribution</h3>{log2fc_html}</div>
     """
     if mean_counts_html:
         combined_html += f"""
@@ -224,10 +329,10 @@ def create_deg_tables_html(deg_df: pd.DataFrame, cluster_markers: Dict[str, List
         if not genes: continue
         sanitized_cluster_name = re.sub(r'\s+', '_', str(cluster))
         if 'avg_log2FC' in deg_df.columns:
-             cluster_num = str(cluster).split()[-1]
-             cluster_deg_df = deg_df.loc[deg_df['gene'].isin(genes) & (deg_df['cluster'].astype(str) == cluster_num)].copy()
-             rename_map = {'gene': 'Gene', 'p_val_adj': 'Adjusted p-value', 'avg_log2FC': 'Log2 Fold Change'}
-             cluster_deg_df = cluster_deg_df[[k for k in rename_map if k in cluster_deg_df.columns]]
+            cluster_num = str(cluster).split()[-1]
+            cluster_deg_df = deg_df.loc[deg_df['gene'].isin(genes) & (deg_df['cluster'].astype(str) == cluster_num)].copy()
+            rename_map = {'gene': 'Gene', 'p_val_adj': 'Adjusted p-value', 'avg_log2FC': 'Log2 Fold Change'}
+            cluster_deg_df = cluster_deg_df[[k for k in rename_map if k in cluster_deg_df.columns]]
         else:
             cols_to_get = ['Feature Name', f"{cluster} Adjusted p value", f"{cluster} Log2 fold change", f"{cluster} Mean Counts"]
             cols_exist = [col for col in cols_to_get if col in deg_df.columns]
@@ -268,6 +373,7 @@ def generate_html_report(sample_name, output_path, sig_results_df, plots_html, d
         df_for_html['Full Gene List'] = df_for_html['Overlapping Genes']
         df_for_html['Overlapping Genes'] = df_for_html['Full Gene List'].apply(truncate_for_table)
         df_for_html.insert(0, '', '')
+    # --- CHANGE: Updated HTML template string for clarity ---
     template_str = """
     <!DOCTYPE html>
     <html><head><title>{{ sample_name }} Report</title>
@@ -282,7 +388,7 @@ def generate_html_report(sample_name, output_path, sig_results_df, plots_html, d
     </head><body>
     <div class="container">
         <header><h1>Enrichment Analysis Report</h1><h2>Sample: <strong>{{ sample_name }}</strong></h2></header>
-        <div class="params"><strong>DEG Selection Parameters:</strong> Adj. p-value &le; {{ params.p_val }} | Log2FC &ge; {{ params.log2fc }} | Mean Counts &ge; {{ params.mean_counts }}{% if params.top_n_genes and params.top_n_genes > 0 %} | Top {{ params.top_n_genes }} Genes per Cluster{% endif %}</div>
+        <div class="params"><strong>DEG Selection Parameters:</strong> Adj. p-value &le; {{ params.p_val }} | Log2FC (Upregulated) &ge; {{ params.log2fc }} | Mean Counts &ge; {{ params.mean_counts }}{% if params.top_n_genes and params.top_n_genes > 0 %} | Top {{ params.top_n_genes }} Genes per Cluster{% endif %}</div>
         <div class="tabs"> <div class="tab-link active" onclick="openTab(event, 'degs')">DEG Browser</div> <div class="tab-link" onclick="openTab(event, 'visuals')">Enrichment Visuals</div> <div class="tab-link" onclick="openTab(event, 'results')">Hypergeometric Result</div> </div>
         <div id="degs" class="tab-content active">{{ deg_tables|safe }}</div>
         <div id="visuals" class="tab-content">
