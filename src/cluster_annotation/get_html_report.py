@@ -186,7 +186,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
         points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
-    
+
     # Set a visual floor to prevent extreme outliers from crushing the y-axis scale,
     # which allows the shape of the main distribution to be visible.
     p_val_floor = 1e-100
@@ -222,7 +222,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
         points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
-    
+
     max_abs_val = filtered_deg_df['log2FC'].abs().max()
     tick_values_orig = [0]
     if max_abs_val > 0 and log2fc_thresh > 0:
@@ -231,12 +231,12 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         tick_values_orig.extend([-p for p in positive_ticks if p > 0])
     tick_values_orig = sorted(list(set(tick_values_orig)))
     tick_values_transformed = [symlog_transform(v) for v in tick_values_orig]
-    
+
     min_fc = filtered_deg_df['log2FC'].min()
     max_fc = filtered_deg_df['log2FC'].max()
     range_min = symlog_transform(min_fc - 0.1)
     range_max = symlog_transform(max_fc + 1)
-    
+
     fig_log2fc.update_layout(
         xaxis_title='',
         yaxis=dict(
@@ -253,7 +253,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
 
     p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn')
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
-    
+
     # ==========================================================================
     # START: REVISED MEAN COUNTS PLOT
     # ==========================================================================
@@ -268,7 +268,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
             points='outliers',  # Show only outliers, not all points
             custom_data=custom_data_cols
         )
-        
+
         # --- Update Traces: Customize hover info and marker style ---
         fig_mean_counts.update_traces(
             hovertemplate=hover_template,
@@ -278,7 +278,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         # --- Y-axis Logic: Set a robust log-scale range and clean tick labels ---
         counts_floor = 1e-4  # A reasonable floor for expression counts
         non_zero_counts = filtered_deg_df['mean_counts'][filtered_deg_df['mean_counts'] > 0]
-        
+
         yaxis_counts_dict = dict(
             title_text='Mean Counts (Log Scale)',
             type="log",
@@ -288,20 +288,20 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
             # Use quantiles to set a y-axis range robust to extreme outliers
             q_low = non_zero_counts.quantile(0.005) # Use 0.5 percentile
             q_high = non_zero_counts.quantile(0.995) # Use 99.5 percentile
-            
+
             min_for_display = max(q_low, counts_floor)
-            
+
             # Add padding to the range
             range_min_val = min_for_display * 0.5
             range_max_val = q_high * 2.0
-            
+
             if range_max_val > range_min_val:
                 yaxis_counts_dict['range'] = [np.log10(range_min_val), np.log10(range_max_val)]
 
                 # --- Generate clean, publication-ready tick marks as powers of 10 ---
                 min_power = np.floor(np.log10(range_min_val))
                 max_power = np.ceil(np.log10(range_max_val))
-                
+
                 tick_values = [10**i for i in range(int(min_power), int(max_power) + 1)]
                 tick_values = [v for v in tick_values if range_min_val <= v <= range_max_val]
 
@@ -319,19 +319,32 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
             font=dict(size=12),
             title=dict(x=0.5, font=dict(size=16)) # Center title
         )
-        
+
         if mean_counts_thresh > 0:
+            # ==================================================================
+            # START: FIX FOR INVISIBLE RED LINE
+            # ==================================================================
+            # Key Fix: Set layer='above' to ensure the line is drawn on top of
+            # the box plots, as the default 'below' layer is hidden by the
+            # filled boxes. Also, explicitly set line_width for visibility.
             fig_mean_counts.add_hline(
-                y=mean_counts_thresh, line_dash="dash", line_color="red",
+                y=mean_counts_thresh,
+                line_dash="dash",
+                line_color="red",
+                line_width=2,
+                layer="above", # This ensures the line is visible on top of the boxes
                 annotation_text=f"Mean counts threshold = {mean_counts_thresh:.2f}",
-                annotation_position="bottom right"
+                annotation_position="top right" # Position annotation for clarity
             )
-            
+            # ==================================================================
+            # END: FIX FOR INVISIBLE RED LINE
+            # ==================================================================
+
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
     # ==========================================================================
     # END: REVISED MEAN COUNTS PLOT
     # ==========================================================================
-    
+
     combined_html = f"""
     <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
     <div style="text-align: center;"><h3>Log2 Fold Change Distribution</h3>{log2fc_html}</div>
