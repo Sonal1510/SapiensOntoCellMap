@@ -6,8 +6,18 @@ Description     : A configurable parser for simple, ad-hoc data files.
 """
 import pandas as pd
 from typing import Optional
-from src.parser.base_parser import BaseParser
-
+import sys
+import os
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.parser.base_parser import BaseParser
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
+    
 class GenericFileParser:
     """
     A generic parser for files that follow a simple structure.

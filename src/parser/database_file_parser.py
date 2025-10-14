@@ -9,18 +9,6 @@ Description    : Manages the parsing of any file type of database.
 import pandas as pd
 import os
 import sys
-# This try/except block is good for robust importing.
-try:
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    if project_root not in sys.path:
-        sys.path.append(project_root)
-    from config.config import RAW_DATA_DIR, DATABASE_SOURCE_DICTIONARY
-except ImportError:
-    print("Error: Could not import from 'config.config'.")
-    print("Please ensure that this script is run from within the project structure,")
-    print("and that 'config/config.py' exists at the project root.")
-    sys.exit(1)
-
 
 class DatabaseFileParser:
     """

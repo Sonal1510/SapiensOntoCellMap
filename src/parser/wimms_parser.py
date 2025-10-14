@@ -5,15 +5,24 @@ Date            : 13/10/2025
 Description     : Parses WIMMS database and uses BaseParser for normalization.
 """
 import pandas as pd
-from src.parser.base_parser import BaseParser
-
+import sys
+import os
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.parser.base_parser import BaseParser
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
+    
 class WimmsMelanocyteParser: # Class name corrected for consistency
     """
     A class to parse the WIMMS database for melanocyte markers.
     """
-    def __init__(self, wimms_df: pd.DataFrame):
-        if not wimms_df.empty:
-            df = wimms_df.copy()
+    def __init__(self, df: pd.DataFrame):
+        if not df.empty:
             
             if 'Unnamed: 0' in df.columns:
                 df = df.drop(columns=['Unnamed: 0'])

@@ -9,27 +9,34 @@ import sys
 import pandas as pd
 from typing import Optional
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.download.bio_database_downloader import BioDataDownloader
+    from src.parser.base_parser import BaseParser
+    from config.config import RAW_DATA_DIR
 
-from src.download.bio_database_downloader import BioDataDownloader
-from config.config import RAW_DATA_DIR
-from src.parser.base_parser import BaseParser # Import the new base class
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
 
 class HuBMapDBParser:
     """
     A class to parse the HuBMAP database, preparing data for the BaseParser.
     """
-    def __init__(self, hubmapdb_df: pd.DataFrame):
-        if not isinstance(hubmapdb_df, pd.DataFrame):
+    def __init__(self, df: pd.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame.")
 
         self.downloader = BioDataDownloader()
         hubmap_organ_df_list = {}
 
-        for organ in set(hubmapdb_df['Organ'].tolist()):
+        for organ in set(df['Organ'].tolist()):
             if organ != "anatomical systems":
                 # ... (file downloading logic remains the same) ...
-                url_file = hubmapdb_df.loc[hubmapdb_df['Organ'] == organ, 'csv'].iloc[0]
+                url_file = df.loc[df['Organ'] == organ, 'csv'].iloc[0]
                 file_name = f"hubmap_{organ.replace(' ', '_')}.csv"
                 file_path = os.path.join(RAW_DATA_DIR, file_name)
                 self.downloader._download_file(url_file, file_path)

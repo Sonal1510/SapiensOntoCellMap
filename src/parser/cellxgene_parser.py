@@ -5,21 +5,31 @@ Date            : 10/01/2025
 Description     : Parses CellxGene database and uses BaseParser for normalization.
 """
 import pandas as pd
-from src.parser.base_parser import BaseParser # Import the new base class
-
+import sys
+import os
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.parser.base_parser import BaseParser # Import the new base class
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
+    
 class CellxGeneDBParser:
     """
     A class to parse the CellxGene database. It unnests the data structure
     and then uses the BaseParser for ontology mapping and normalization.
     """
-    def __init__(self, cellxgenedb_df: pd.DataFrame):
-        if not isinstance(cellxgenedb_df, pd.DataFrame):
+    def __init__(self, df: pd.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame.")
 
         # --- Step 1: Unnest the DataFrame (Parser-specific logic) ---
         rows = []
-        for tissue, row in cellxgenedb_df.iterrows():
-            for organism in cellxgenedb_df.columns:
+        for tissue, row in df.iterrows():
+            for organism in df.columns:
                 cell_dict = row[organism]
                 if isinstance(cell_dict, dict):
                     for cell_id, markers in cell_dict.items():

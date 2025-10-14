@@ -5,24 +5,34 @@ Date            : 10/01/2025
 Description     : Parses Panglao database and uses BaseParser for normalization.
 """
 import pandas as pd
-from src.parser.base_parser import BaseParser # Import the new base class
-
+import sys
+import os
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.parser.base_parser import BaseParser # Import the new base class
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
+    
 class PanglaoParser:
     """
     A class to parse the Panglao database, preparing the data for the BaseParser.
     """
-    def __init__(self, panglaodb_df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame):
         """
         Initializes the parser by preparing the data and invoking the BaseParser.
 
         Args:
             panglaodb_df (pd.DataFrame): The input DataFrame from the Panglao database.
         """
-        if not isinstance(panglaodb_df, pd.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame.")
 
         # --- Step 1: Filter and Prepare the DataFrame ---
-        df = panglaodb_df[panglaodb_df['species'].isin(['Hs', 'Mm Hs'])].copy()
+        df = df[df['species'].isin(['Hs', 'Mm Hs'])].copy()
 
         # Rename columns to the 'db_' intermediate schema
         df.rename(columns={

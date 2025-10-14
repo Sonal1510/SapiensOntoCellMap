@@ -2,16 +2,26 @@ import sys
 import os
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+try:
+    # This structure is robust for running from different locations.
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.download.bio_database_downloader import BioDataDownloader
+    from src.db_manager.database_creator import DatabaseCreate
+    from config.config import (
+        PROCESSED_DATA_DIR,
+        RECOVER_ID_DATA_DIR,
+        PROCESSED_COMBINED_DATA_DIR,
+        DATABASE_CONFIG # Import the central config
+    )
 
-from src.download.bio_database_downloader import BioDataDownloader
-from src.db_manager.database_creator import DatabaseCreate
-from config.config import (
-    PROCESSED_DATA_DIR,
-    RECOVER_ID_DATA_DIR,
-    PROCESSED_COMBINED_DATA_DIR,
-    DATABASE_CONFIG # Import the central config
-)
+except ImportError:
+    print("Error: Could not import from 'config.config'.")
+    print("Please ensure that this script is run from within the project structure,")
+    print("and that 'config/config.py' exists at the project root.")
+    sys.exit(1)
+
 
 def run_downloader_tests():
     """Tests the BioDataDownloader class."""

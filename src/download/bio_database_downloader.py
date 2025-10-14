@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 
 """
-Author         : Sonal Rashmi (expert review by Gemini)
-Date           : 15/08/2025
-Description    : Manages the download of biological datasets.
+Author          : Sonal Rashmi (expert review by Gemini)
+Date            : 15/08/2025
+Description     : Manages the download of biological datasets.
 """
 
 import requests
@@ -14,13 +14,11 @@ try:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     if project_root not in sys.path:
         sys.path.append(project_root)
-    from config.config import RAW_DATA_DIR, DATABASE_SOURCE_DICTIONARY
-except ImportError:
-    print("Error: Could not import from 'config.config'.")
-    print("Please ensure that this script is run from within the project structure,")
-    print("and that 'config/config.py' exists at the project root.")
+    from config.config import RAW_DATA_DIR, DATABASE_CONFIG
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
     sys.exit(1)
-
 
 class BioDataDownloader:
     """
@@ -77,25 +75,34 @@ class BioDataDownloader:
 
     def download_all_databases(self):
         """
-        Iterates through the DATABASE_SOURCE_DICTIONARY and downloads each file.
+        Iterates through the DATABASE_CONFIG and downloads each file.
 
         Returns:
             list: A list of file paths for all successfully downloaded files.
         """
         downloaded_files = []
-        for db_name, (url, file_name, filetype) in DATABASE_SOURCE_DICTIONARY.items():
+        # CORRECTED: Iterate over key-value pairs directly from .items()
+        for db_name, config in DATABASE_CONFIG.items():
+            # Use .get() for safer access in case 'source' key is ever missing
+            source_info = config.get('source')
+            if not source_info or len(source_info) != 3:
+                print(f"⚠️ Warning: Skipping '{db_name}' due to malformed 'source' configuration.")
+                continue
+
+            url, file_name, file_type = source_info
             _file_path = os.path.join(self.output_dir, file_name)
+            
             if url:
                 print(f"\n--- Downloading {db_name} Data ---")
                 file_path = self._download_file(url, _file_path)
                 if file_path:
                     downloaded_files.append(file_path)
             else:
-                print(f"\n--- Not Downloading {db_name} Data ---")
+                print(f"\n--- Checking for manually downloaded {db_name} Data ---")
                 if os.path.exists(_file_path):
-                    print(f"--- {db_name} exists ---")
+                    print(f"--- ✅ {db_name} exists at {_file_path} ---")
                 else:
-                    print(f"--- {db_name} not existing. Download the database manually. ---")
+                    print(f"--- ❌ {db_name} not found at {_file_path}. Please download it manually. ---")
         
         print("\n--- Download Summary ---")
         if downloaded_files:
@@ -103,7 +110,6 @@ class BioDataDownloader:
             for path in downloaded_files:
                 print(f" - {path}")
         else:
-            print("No files were downloaded.")
+            print("No new files were downloaded.")
             
         return downloaded_files
-

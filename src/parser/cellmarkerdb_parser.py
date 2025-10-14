@@ -5,26 +5,36 @@ Date            : 15/08/2025
 Description     : Parses cellmarker database and uses BaseParser for normalization.
 """
 import pandas as pd
-from src.parser.base_parser import BaseParser # Import the new base class
+import sys
+import os
+try:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.parser.base_parser import BaseParser # Import the new base class
+except ImportError as e:
+    print(f"❌ A critical import error occurred: {e}")
+    print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
+    sys.exit(1)
+
 
 class CellMarkerDBParser:
     """
     A class to parse the Cell Marker database. It prepares the data
     and then uses the BaseParser for ontology mapping and normalization.
     """
-    def __init__(self, cellmarkerdb_df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame):
         """
         Initializes the parser by preparing the data and invoking the BaseParser.
 
         Args:
             cellmarkerdb_df (pd.DataFrame): The input DataFrame from the CellMarker database.
         """
-        if not isinstance(cellmarkerdb_df, pd.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame.")
 
         # --- Step 1: Prepare the DataFrame with 'db_' prefixed columns ---
-        df = cellmarkerdb_df.copy()
-
+        
         # Rename columns to the intermediate schema
         df.rename(columns={
             'tissue_class': 'db_tissue_name',
