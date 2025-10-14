@@ -56,24 +56,24 @@ def plot_dynamic_heatmap_with_bars(
     if sig_results_df.empty:
         return f"<h3>Heatmap (Top {top_n_celltypes})</h3><p>No significant enrichments found.</p>"
 
-    required_cols = ['Cluster', 'Cell Type', 'adj_p_value', 'Enrichment Ratio']
+    required_cols = ['Cluster', 'Cell_type', 'adj_p_value', 'Enrichment_ratio']
     if not all(col in sig_results_df.columns for col in required_cols):
         raise ValueError(f"Input DataFrame is missing one of the required columns: {required_cols}")
 
     df = sig_results_df.copy()
-    df['Enrichment Ratio'] = pd.to_numeric(df['Enrichment Ratio'], errors='coerce').fillna(0)
+    df['Enrichment_ratio'] = pd.to_numeric(df['Enrichment_ratio'], errors='coerce').fillna(0)
     df['adj_p_value'] = pd.to_numeric(df['adj_p_value'], errors='coerce')
     df_sorted = df.sort_values(
-        by=['Cluster', 'adj_p_value', 'Enrichment Ratio'],
+        by=['Cluster', 'adj_p_value', 'Enrichment_ratio'],
         ascending=[True, True, False]
     )
     top_hits_per_cluster = df_sorted.groupby('Cluster').head(top_n_celltypes)
-    top_cell_types_list = top_hits_per_cluster['Cell Type'].unique().tolist()
-    top_sig_results = df[df['Cell Type'].isin(top_cell_types_list)]
+    top_cell_types_list = top_hits_per_cluster['Cell_type'].unique().tolist()
+    top_sig_results = df[df['Cell_type'].isin(top_cell_types_list)]
     heatmap_df = top_sig_results.pivot_table(
         index='Cluster',
-        columns='Cell Type',
-        values='Enrichment Ratio',
+        columns='Cell_type',
+        values='Enrichment_ratio',
         fill_value=0
     )
     try:
@@ -83,7 +83,7 @@ def plot_dynamic_heatmap_with_bars(
     except (ValueError, IndexError):
         heatmap_df = heatmap_df.sort_index()
 
-    cbar_label = 'Enrichment Ratio'
+    cbar_label = 'Enrichment_ratio'
 
     if cluster_axes and not heatmap_df.empty:
         if heatmap_df.shape[1] > 1:
@@ -95,7 +95,7 @@ def plot_dynamic_heatmap_with_bars(
             row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=heatmap_df.index)
             heatmap_df = heatmap_df.reindex(row_dendrogram['ivl'])
 
-    cluster_freq = sig_results_df.groupby('Cluster')['Cell Type'].nunique().reindex(heatmap_df.index).fillna(0)
+    cluster_freq = sig_results_df.groupby('Cluster')['Cell_type'].nunique().reindex(heatmap_df.index).fillna(0)
     fig_height = max(8, len(heatmap_df.index) * 0.3)
     fig_width = max(10, len(heatmap_df.columns) * 0.5)
     fig = plt.figure(figsize=(fig_width, fig_height), layout="constrained")

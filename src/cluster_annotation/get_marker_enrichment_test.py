@@ -208,11 +208,11 @@ class MarkerEnrichmentTest:
                 results.append(
                     {
                         "Cluster": cluster_id,
-                        "Cell Type": cell_type,
+                        "Cell_type": cell_type,
                         "p_value": p_val,
-                        "Enrichment Ratio": enrichment,
-                        "Overlapping Genes Count": k,
-                        "Overlapping Genes": ", ".join(sorted(overlap)),
+                        "Enrichment_ratio": enrichment,
+                        "Overlapping_genes_count": k,
+                        "Overlapping_genes": ", ".join(sorted(overlap)),
                     }
                 )
 
@@ -228,7 +228,7 @@ class MarkerEnrichmentTest:
         )
 
     def plot_results(
-        self, p_val_cutoff=0.05, value_col="Enrichment Ratio", top_n_per_cluster=10
+        self, p_val_cutoff=0.05, value_col="Enrichment_ratio", top_n_per_cluster=10
     ):
         # This method does not need changes
         if self.results_.empty:
@@ -257,15 +257,15 @@ class MarkerEnrichmentTest:
         plt.figure(
             figsize=(
                 max(8, len(plot_df["Cluster"].unique()) * 0.8),
-                max(6, len(plot_df["Cell Type"].unique()) * 0.5),
+                max(6, len(plot_df["Cell_type"].unique()) * 0.5),
             )
         )
 
         scatter = sns.scatterplot(
             data=plot_df,
             x="Cluster",
-            y="Cell Type",
-            size="Overlapping Genes Count",
+            y="Cell_type",
+            size="Overlapping_genes_count",
             hue=value_col,
             palette="viridis",
             sizes=(50, 500),
@@ -275,7 +275,7 @@ class MarkerEnrichmentTest:
 
         plt.title("Marker Enrichment Analysis Results")
         plt.xlabel("Cluster")
-        plt.ylabel("Cell Type")
+        plt.ylabel("Cell_type")
         plt.xticks(rotation=45, ha="right")
         plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.0)
         plt.grid(True, which="both", linestyle="--", linewidth=0.5)

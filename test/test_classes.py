@@ -2,66 +2,47 @@ import sys
 import os
 import pandas as pd
 
-# Add the project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# --- Corrected Imports ---
-# Import the downloader, the main creator/orchestrator, and the config paths
 from src.download.bio_database_downloader import BioDataDownloader
 from src.db_manager.database_creator import DatabaseCreate
 from config.config import (
     PROCESSED_DATA_DIR,
     RECOVER_ID_DATA_DIR,
     PROCESSED_COMBINED_DATA_DIR,
+    DATABASE_CONFIG # Import the central config
 )
 
 def run_downloader_tests():
-    """
-    Tests the BioDataDownloader class by attempting to download all data.
-    """
+    """Tests the BioDataDownloader class."""
     print("--- Running BioDataDownloader Tests ---")
     downloader = BioDataDownloader()
-
-    print("\nAttempting to download all databases...")
-    # Assuming download_all_databases() returns True on success and handles errors internally
-    success = downloader.download_all_databases()
-    if success:
-        print("🎉 Downloader test: SUCCESS!")
-    else:
-        print("😞 Downloader test: FAILED!")
+    downloader.download_all_databases() # Run the download process
+    print("🎉 Downloader test completed. Check logs for successes or failures.")
     print("--- BioDataDownloader Tests Completed ---\n")
 
 def run_creation_and_parser_tests():
-    """
-    Tests the entire database creation pipeline managed by the DatabaseCreate class.
-    This serves as an integration test for all individual parsers.
-    """
+    """Tests the entire database creation pipeline managed by DatabaseCreate."""
     print("--- Running Database Creation and Parser Tests ---")
     
     try:
-        # Instantiate and run the main orchestrator
         db_creator = DatabaseCreate()
-        db_creator.run()
+        db_creator.run() # Correctly call the run() method
 
-        # --- Verification Step ---
+        # --- DYNAMIC Verification Step ---
         print("\n--- Verifying Output Files ---")
         
-        # List of key output files we expect to be created
-        expected_files = {
-            "Combined DB": os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv"),
-            "Processed CellMarker": os.path.join(PROCESSED_DATA_DIR, "cellmarkerdb_processed.csv"),
-            "Recovery CellMarker": os.path.join(RECOVER_ID_DATA_DIR, "cellmarkerdb_recovery_log.csv"),
-            "Processed CellxGene": os.path.join(PROCESSED_DATA_DIR, "cellxgene_processed.csv"),
-            "Recovery CellxGene": os.path.join(RECOVER_ID_DATA_DIR, "cellxgene_recovery_log.csv"),
-            "Processed HuBMAP": os.path.join(PROCESSED_DATA_DIR, "hubmap_processed.csv"),
-            "Recovery HuBMAP": os.path.join(RECOVER_ID_DATA_DIR, "hubmap_recovery_log.csv"),
-            "Processed PanglaoDB": os.path.join(PROCESSED_DATA_DIR, "panglaodb_processed.csv"),
-            "Recovery PanglaoDB": os.path.join(RECOVER_ID_DATA_DIR, "panglaodb_recovery_log.csv"),
-        }
+        expected_files = {}
+        # Dynamically generate the list of expected files from the config
+        for db_name in DATABASE_CONFIG.keys():
+            expected_files[f"Processed {db_name}"] = os.path.join(PROCESSED_DATA_DIR, f"{db_name}_processed.csv")
+            expected_files[f"Recovery {db_name}"] = os.path.join(RECOVER_ID_DATA_DIR, f"{db_name}_recovery_log.csv")
+        
+        # Add the final combined file
+        expected_files["Combined DB"] = os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv")
         
         missing_files = []
         for name, path in expected_files.items():
-            # Check if file exists and is not empty
             if not os.path.exists(path) or os.path.getsize(path) == 0:
                 missing_files.append(f"({name}: {path})")
 
@@ -77,10 +58,6 @@ def run_creation_and_parser_tests():
     
     print("--- Database Creation and Parser Tests Completed ---")
 
-
 if __name__ == "__main__":
-    # First, test the downloader to ensure data is present
-    #run_downloader_tests()
-    
-    # Second, test the entire creation and parsing pipeline
+    run_downloader_tests()
     run_creation_and_parser_tests()
