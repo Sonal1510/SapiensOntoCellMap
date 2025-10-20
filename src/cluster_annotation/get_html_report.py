@@ -86,14 +86,57 @@ def plot_dynamic_heatmap_with_bars(
     cbar_label = 'Enrichment_ratio'
 
     if cluster_axes and not heatmap_df.empty:
-        if heatmap_df.shape[1] > 1:
-            col_linkage = linkage(heatmap_df.T, method='average', metric='correlation')
-            col_dendrogram = dendrogram(col_linkage, no_plot=True, labels=heatmap_df.columns)
-            heatmap_df = heatmap_df[col_dendrogram['ivl']]
-        if heatmap_df.shape[0] > 1:
-            row_linkage = linkage(heatmap_df, method='average', metric='correlation')
-            row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=heatmap_df.index)
-            heatmap_df = heatmap_df.reindex(row_dendrogram['ivl'])
+        # --- START: Robust clustering fix ---
+        # The original code could fail if a row or column in the heatmap has
+        # zero variance (i.e., all values are the same), as this results in a
+        # NaN during correlation calculation, which `scipy.cluster.hierarchy.linkage`
+        # cannot handle.
+        # This revised logic separates data with variance from data without,
+        # clusters the valid data, and then appends the zero-variance data,
+        # preventing the crash while preserving all data in the final plot.
+
+        # Identify rows and columns that have variance and are suitable for clustering
+        rows_with_variance = heatmap_df.index[heatmap_df.std(axis=1) > 0]
+        cols_with_variance = heatmap_df.columns[heatmap_df.std(axis=0) > 0]
+
+        # Subset the dataframe to only the parts that can be clustered
+        clustered_df = heatmap_df.loc[rows_with_variance, cols_with_variance]
+
+        # Initialize final orderings with the original order
+        final_row_order = list(heatmap_df.index)
+        final_col_order = list(heatmap_df.columns)
+
+        # Perform column clustering if there are at least two columns with variance
+        if len(cols_with_variance) > 1:
+            try:
+                col_linkage = linkage(clustered_df.T, method='average', metric='correlation')
+                col_dendrogram = dendrogram(col_linkage, no_plot=True, labels=clustered_df.columns)
+                # The new order for clustered columns
+                ordered_cols = col_dendrogram['ivl']
+                # Append columns that were not clustered (zero variance)
+                cols_without_variance = [c for c in heatmap_df.columns if c not in ordered_cols]
+                final_col_order = ordered_cols + cols_without_variance
+            except Exception as e:
+                logging.warning(f"Column clustering failed: {e}. Using default order.")
+
+        # Perform row clustering if there are at least two rows with variance
+        if len(rows_with_variance) > 1:
+            try:
+                row_linkage = linkage(clustered_df, method='average', metric='correlation')
+                row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=clustered_df.index)
+                # The new order for clustered rows
+                ordered_rows = row_dendrogram['ivl']
+                # Append rows that were not clustered (zero variance)
+                rows_without_variance = [r for r in heatmap_df.index if r not in ordered_rows]
+                final_row_order = ordered_rows + rows_without_variance
+            except Exception as e:
+                logging.warning(f"Row clustering failed: {e}. Using default order.")
+
+        # Reorder the original dataframe with the new, safe ordering.
+        # This ensures all original data is plotted, even if it couldn't be clustered.
+        heatmap_df = heatmap_df.reindex(index=final_row_order, columns=final_col_order)
+        # --- END: Robust clustering fix ---
+
 
     cluster_freq = sig_results_df.groupby('Cluster')['Cell_type'].nunique().reindex(heatmap_df.index).fillna(0)
     fig_height = max(8, len(heatmap_df.index) * 0.3)

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def get_cell_name_marker_reference_map(combined_df):
     combined_df = combined_df.assign(
-        database_cell_name=combined_df["database"] + "_" + combined_df["cell_name"]
+        database_cell_name=combined_df["database"] + "_" + combined_df["db_cell_name"]
     )
     return combined_df.groupby("database_cell_name")["gene"].apply(list).to_dict()
 
@@ -124,15 +124,19 @@ def main():
     parser.add_argument("--log2fc", type=float, default=1.0, help="Log2 fold-change threshold (default: 1.0)")
     parser.add_argument("--mean", type=float, default=0.0, help="Mean count threshold (default: 0)")
     parser.add_argument("--topgenes", type=int, default=None, help="Top N genes to include (default: None)")
-
+    parser.add_argument("--marker_db", required=True, help="Path to the master cell marker database CSV.")
+    parser.add_argument("--tissue", type=str, default=None, help="Filter marker DB for a specific tissue.")
+    
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
     try:
-        combined_path = os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv")
-        if not os.path.exists(combined_path):
-             raise FileNotFoundError(f"Missing combined DB at: {combined_path}")
-        combined_df = pd.read_csv(combined_path)
+        combined_df = pd.read_csv(args.marker_db, dtype=str)
+        if args.tissue:
+            original_rows = len(combined_df)
+            combined_df = combined_df[combined_df['tissue_name'].str.contains(args.tissue, case=False, na=False)]
+            logger.info(f"Filtered DB for tissue '{args.tissue}'. Kept {len(combined_df)} of {original_rows} entries.")
+        
         combined_df_dict = get_cell_name_marker_reference_map(combined_df)
         logger.info("Cell marker reference map created successfully.")
 
