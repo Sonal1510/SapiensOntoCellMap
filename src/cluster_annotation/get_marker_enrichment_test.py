@@ -42,6 +42,8 @@ class MarkerEnrichmentTest:
             p_val_thresh (float): Adjusted p-value threshold for filtering significant genes.
             log2fc_thresh (float): Log2 fold change threshold for filtering significant genes.
             mean_counts_thresh (float): Mean counts threshold for filtering significant genes.
+                                     For 'spatial' data, if this is 0 (default), it will be
+                                     re-calculated as the 75th percentile of positive counts.
             top_genes (int, optional): If provided, selects the top N genes based on Log2 fold change per cluster. Defaults to None.
         """
         if not deg_file or not os.path.exists(deg_file):
@@ -55,11 +57,37 @@ class MarkerEnrichmentTest:
         }
         self.p_val_thresh = p_val_thresh
         self.log2fc_thresh = log2fc_thresh
-        self.mean_counts_thresh = mean_counts_thresh
+        # Store user-provided value. We will modify this *after* normalization.
+        self.mean_counts_thresh = mean_counts_thresh 
         self.top_genes = top_genes
         
         # Normalize the DEG dataframe into a consistent long format
         self.deg_df_long = self._normalize_deg_df()
+        
+        # If spatial data and user left default mean_counts_thresh (0.0),
+        # calculate 75th percentile (3rd quartile) from *positive* counts.
+        if self.deg_file_type == 'spatial' and self.mean_counts_thresh == 0.0:
+            logging.info("Default mean threshold (0.0) provided for spatial data. Calculating 75th percentile...")
+            if 'Mean Counts' in self.deg_df_long.columns:
+                # Calculate percentile only from positive (expressed) counts
+                positive_mean_counts = self.deg_df_long[self.deg_df_long['Mean Counts'] > 0]['Mean Counts']
+                
+                if not positive_mean_counts.empty:
+                    q3_thresh = positive_mean_counts.quantile(0.75)
+                    self.mean_counts_thresh = q3_thresh
+                    logging.info(f"Using 75th percentile of positive mean counts as threshold: {self.mean_counts_thresh:.4f}")
+                else:
+                    logging.warning("No positive mean counts found. Defaulting threshold to 0.0")
+                    self.mean_counts_thresh = 0.0
+            else:
+                logging.warning("'Mean Counts' column not found after normalization. Defaulting threshold to 0.0")
+                self.mean_counts_thresh = 0.0
+        
+        elif self.deg_file_type == 'scrna':
+            # scRNA-seq doesn't use mean_counts, so ensure threshold is 0
+            if self.mean_counts_thresh > 0.0:
+                logging.warning(f"Mean counts threshold ({self.mean_counts_thresh}) is not applicable for 'scrna' data. Setting to 0.0.")
+            self.mean_counts_thresh = 0.0
         
         # Background genes are all unique genes present in the normalized table
         self.background_genes = set(self.deg_df_long["Feature Name"].unique())
@@ -92,6 +120,7 @@ class MarkerEnrichmentTest:
             # Add a placeholder for mean counts if it doesn't exist
             if 'Mean Counts' not in df.columns:
                  df['Mean Counts'] = 0
+                 logging.info("No 'Mean Counts' column found for scrna data. Creating a placeholder column with 0s.")
 
             # Ensure cluster names are strings
             df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
@@ -133,7 +162,13 @@ class MarkerEnrichmentTest:
                  if col in df_pivot.columns:
                     df_pivot[col] = pd.to_numeric(df_pivot[col], errors='coerce')
                  else: # If a column is missing (like Mean Counts), add it
+                    logging.warning(f"Column '{col}' not found in spatial DEG file. Creating a placeholder column with 0s.")
                     df_pivot[col] = 0
+            
+            # Fill NaNs in numeric columns with 0, especially important for Mean Counts
+            df_pivot['Adjusted p value'] = df_pivot['Adjusted p value'].fillna(1.0)
+            df_pivot['Log2 fold change'] = df_pivot['Log2 fold change'].fillna(0.0)
+            df_pivot['Mean Counts'] = df_pivot['Mean Counts'].fillna(0.0)
             
             return df_pivot
 
@@ -146,6 +181,8 @@ class MarkerEnrichmentTest:
         Runs the full enrichment analysis pipeline.
         """
         logging.info("Filtering DEGs from normalized dataframe...")
+        # Log the final thresholds being used for filtering
+        logging.info(f"Filtering with: p_val <= {self.p_val_thresh}, log2fc >= {self.log2fc_thresh}, mean_counts >= {self.mean_counts_thresh}")
         self.cluster_markers = self._filter_and_extract_degs()
         logging.info("Running hypergeometric enrichment test...")
         self.results_ = self._run_hypergeometric_test()
@@ -166,6 +203,8 @@ class MarkerEnrichmentTest:
             mask = (cluster_df['Adjusted p value'] < self.p_val_thresh) & \
                    (cluster_df['Log2 fold change'] > self.log2fc_thresh)
 
+            # This condition now uses the dynamically calculated threshold for spatial
+            # or 0 for scrna.
             if self.mean_counts_thresh > 0 and 'Mean Counts' in cluster_df.columns:
                 mask &= (cluster_df['Mean Counts'] > self.mean_counts_thresh)
 
