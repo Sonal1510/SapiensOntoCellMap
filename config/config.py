@@ -11,6 +11,7 @@ import os
 # --- Directory Paths --- (No changes here, sys.path logic removed as it's not needed here)
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DATA_DIR = os.path.join(_CURRENT_DIR, '..', 'data')
+
 RAW_DATA_DIR = os.path.join(BASE_DATA_DIR, 'raw')
 PROCESSED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed_db_dfs')
 RECOVER_ID_DATA_DIR = os.path.join(BASE_DATA_DIR, 'recovered_ids_dfs')
@@ -32,7 +33,7 @@ DATABASE_CONFIG = {
         "parser_config": {}
     },
     "hubmap": {
-        "source": ["", "../pre_manually_downloaded_files/hubmap_summary.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/hubmap_summary.csv"), "csv"],
         "parser_key": "hubmap",
         "parser_config": {}
     },
@@ -47,8 +48,13 @@ DATABASE_CONFIG = {
         "parser_config": {}
     },
     "wimms": {
-        "source": ["", "../pre_manually_downloaded_files/wimms_signature.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/wimms_signature.csv"), "csv"],
         "parser_key": "wimms",
+        "parser_config": {}
+    },
+    "human_scc_cell_2020": {
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/mmc2.xlsx"), "xlsx"],
+        "parser_key": "human_scc_cell_2020",
         "parser_config": {}
     },
     "epi_cluster_gse147482": {
@@ -78,7 +84,7 @@ DATABASE_CONFIG = {
         }
     },
     "scar_cell_marker_gse130973": {
-        "source": ["", "../pre_manually_downloaded_files/GSE130973_2020_sc_skin_Cell_anno_V2_marker_genes.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE130973_2020_sc_skin_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
              "database_name": "ScarCellMarker_GSE130973",
@@ -90,7 +96,7 @@ DATABASE_CONFIG = {
          }
      },
     "scar_cell_marker_gse163973": {
-        "source": ["", "../pre_manually_downloaded_files/GSE163973_2021_NC_sc_keloid_Cell_anno_V2_marker_genes.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE163973_2021_NC_sc_keloid_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
             "database_name": "ScarCellMarker_GSE163973",
@@ -102,7 +108,7 @@ DATABASE_CONFIG = {
         }
     },
     "scar_cell_marker_gse138669": {
-        "source": ["", "../pre_manually_downloaded_files/GSE138669_2018_JID_sc_skin_Cell_anno_V2_marker_genes.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE138669_2018_JID_sc_skin_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
             "database_name": "ScarCellMarker_GSE138669",
@@ -114,7 +120,7 @@ DATABASE_CONFIG = {
         }
     },
     "scar_cell_marker_gse156326": {
-        "source": ["", "../pre_manually_downloaded_files/GSE156326_2021_NC_sc_hyper_Cell_anno_V2_marker_genes.csv", "csv"],
+        "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE156326_2021_NC_sc_hyper_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
             "database_name": "ScarCellMarker_GSE156326",
@@ -129,3 +135,4 @@ DATABASE_CONFIG = {
 # HuBMAP: https://humanatlas.io/asctb-tables manually download the latest version and further once parsed the summary file to get the organ csv url and download 
 # ScarCellMarker: http://124.220.48.30:3838/ScarCellMarker/#tab-8377-7 manually downloaded by clicking on the ratio buttons of each study
 # WIMMS: session id changes each time making the download difficult hence downloaded using url https://wimms.tanlab.org/ -> signature and datasets download all link
+# Skin SCC: https://www.cell.com/cell/fulltext/S0092-8674(20)30672-3?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS0092867420306723%3Fshowall%3Dtrue supplementary table 2 manually downloaded

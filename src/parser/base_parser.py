@@ -71,13 +71,6 @@ class BaseParser:
         df_proc['tissue_name'] = corrected_tissue_ids.map(self.p.uberon_id_to_name)
         df_proc['cell_name'] = corrected_cell_ids.map(self.p.cl_id_to_name)
 
-        # For cellmarkerdb specifically, handle cancer type suffix
-        if 'cancer_type' in df_proc.columns:
-             df_proc['cell_name'] = df_proc.apply(
-                lambda row: f"{row['cell_name']}_{row['cancer_type']}" if pd.notna(row['cell_name']) and pd.notna(row['cancer_type']) and row['cancer_type'] else row['cell_name'],
-                axis=1
-            )
-            
         # 6. Finalize Schema (No changes here)
         final_cols = [
             'db_tissue_name', 'db_tissue_id', 'db_cell_name', 'db_cell_id',

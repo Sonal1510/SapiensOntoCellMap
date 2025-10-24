@@ -53,11 +53,18 @@ class CellMarkerDBParser:
         )
         df["database"] = "cellmarkerdb"
         
-        # Keep cancer_type for the BaseParser to handle the suffix
-        df['cancer_type'] = df.get('cancer_type', pd.Series(index=df.index, dtype=str))
+        # Keep cancer_type in a dictionary handle the suffix
+        cancer_type_series = df['cancer_type'].copy()
 
 
         # --- Step 3: Use the BaseParser for normalization ---
         normalizer = BaseParser()
         # The normalize_dataframe method now returns both the processed_df and recovery_df
         self.processed_df, self.recovery_df = normalizer.normalize_dataframe(df)
+
+        if not self.processed_df.empty:
+            suffix_col = cancer_type_series.reindex(self.processed_df.index)
+            self.processed_df['suffix_col_temp'] = suffix_col
+            self.processed_df['db_cell_name'] = self.processed_df['db_cell_name'] +"_" +self.processed_df['suffix_col_temp']
+            self.processed_df.drop(columns=['suffix_col_temp'], inplace=True)
+

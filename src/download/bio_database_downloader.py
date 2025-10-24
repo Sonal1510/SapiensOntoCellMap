@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 
 """
-Author          : Sonal Rashmi (expert review by Gemini)
-Date            : 15/08/2025
-Description     : Manages the download of biological datasets.
+Author         : Sonal Rashmi (expert review by Gemini)
+Date           : 15/08/2025
+Description    : Manages the download of biological datasets, skipping existing files.
 """
 
 import requests
@@ -23,6 +23,7 @@ except ImportError as e:
 class BioDataDownloader:
     """
     A class to manage the download and organization of biological datasets.
+    Skips downloading files that already exist.
     """
     def __init__(self):
         """
@@ -30,60 +31,73 @@ class BioDataDownloader:
         and ensures the directory exists.
         """
         self.output_dir = RAW_DATA_DIR
-        # The config file already creates this, but it's safe to have it here too.
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Output directory set to: {self.output_dir}")
+        self.skipped_files = [] # Keep track of skipped files
 
-    def _download_file(self, url, file_name):
+    def _download_file(self, url, file_path): # Renamed file_name to file_path for clarity
         """
         Private helper method to download a file from a URL to the output directory.
+        Checks if the file already exists before downloading.
         Includes error handling, streaming for large files, and status code checks.
 
         Args:
             url (str): The URL of the file to download.
-            file_name (str): The name to save the downloaded file as.
+            file_path (str): The full path where the file should be saved.
 
         Returns:
-            str: The full path to the saved file if successful, None otherwise.
+            str: The full path to the file (either existing or newly downloaded) if available, None otherwise.
         """
-        print(f"Attempting to download from: {url}\nSaving to: {file_name}")
+        # --- Check if file already exists ---
+        if os.path.exists(file_path):
+            print(f"⚠️ File already exists at: {file_path}. Skipping download.")
+            self.skipped_files.append(file_path) # Add to skipped list
+            return file_path # Return the existing path
+        # --- End Check ---
+
+        print(f"Attempting to download from: {url}\nSaving to: {file_path}")
         try:
-            # Define headers to mimic a web browser, which can prevent being blocked.
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            # Use stream=True to handle large files efficiently without loading them into memory.
-            with requests.get(url, stream=True, headers=headers, timeout=30) as response:
-                # Raise an HTTPError for bad responses (4xx client or 5xx server errors).
+            with requests.get(url, stream=True, headers=headers, timeout=60) as response: # Increased timeout slightly
                 response.raise_for_status()
 
                 # Write content to the file in chunks.
-                with open(file_name, 'wb') as file:
+                with open(file_path, 'wb') as file:
                     for chunk in response.iter_content(chunk_size=8192):
                         file.write(chunk)
-                        
-            print(f"✅ File downloaded successfully to: {file_name}")
-            return file_name
+
+                print(f"✅ File downloaded successfully to: {file_path}")
+                return file_path
+        except requests.exceptions.Timeout:
+             print(f"❌ Timeout error downloading file from {url}")
+             return None
         except requests.exceptions.RequestException as e:
-            # Catch all request-related errors (connection, timeout, HTTP errors).
             print(f"❌ Error downloading file from {url}: {e}")
+            # Optionally remove partially downloaded file
+            if os.path.exists(file_path):
+                 try:
+                     os.remove(file_path)
+                     print(f"🧹 Removed partially downloaded file: {file_path}")
+                 except OSError as oe:
+                      print(f"❌ Error removing partial file {file_path}: {oe}")
             return None
         except Exception as e:
-            # Catch any other unexpected errors during the download process.
             print(f"❌ An unexpected error occurred during download of {url}: {e}")
             return None
 
     def download_all_databases(self):
         """
-        Iterates through the DATABASE_CONFIG and downloads each file.
+        Iterates through the DATABASE_CONFIG and downloads each file if it doesn't exist.
 
         Returns:
-            list: A list of file paths for all successfully downloaded files.
+            list: A list of file paths for all available files (existing or newly downloaded).
         """
-        downloaded_files = []
-        # CORRECTED: Iterate over key-value pairs directly from .items()
+        available_files = []
+        self.skipped_files = [] # Reset skipped list for this run
+
         for db_name, config in DATABASE_CONFIG.items():
-            # Use .get() for safer access in case 'source' key is ever missing
             source_info = config.get('source')
             if not source_info or len(source_info) != 3:
                 print(f"⚠️ Warning: Skipping '{db_name}' due to malformed 'source' configuration.")
@@ -91,25 +105,38 @@ class BioDataDownloader:
 
             url, file_name, file_type = source_info
             _file_path = os.path.join(self.output_dir, file_name)
-            
-            if url:
-                print(f"\n--- Downloading {db_name} Data ---")
-                file_path = self._download_file(url, _file_path)
-                if file_path:
-                    downloaded_files.append(file_path)
-            else:
-                print(f"\n--- Checking for manually downloaded {db_name} Data ---")
+
+            if url: # If URL is provided, attempt download (which includes the existence check)
+                print(f"\n--- Processing {db_name} Data ---")
+                file_path_result = self._download_file(url, _file_path)
+                if file_path_result:
+                    available_files.append(file_path_result)
+            else: # If no URL, just check if the file exists manually
+                print(f"\n--- Checking for manually placed {db_name} Data ---")
                 if os.path.exists(_file_path):
-                    print(f"--- ✅ {db_name} exists at {_file_path} ---")
+                    print(f"✅ File exists at: {_file_path}")
+                    available_files.append(_file_path)
+                    # No need to add to skipped_files here, as it wasn't an attempted download
                 else:
-                    print(f"--- ❌ {db_name} not found at {_file_path}. Please download it manually. ---")
-        
-        print("\n--- Download Summary ---")
-        if downloaded_files:
-            print(f"Successfully downloaded {len(downloaded_files)} file(s):")
-            for path in downloaded_files:
-                print(f" - {path}")
-        else:
-            print("No new files were downloaded.")
-            
-        return downloaded_files
+                    print(f"❌ File not found at {_file_path}. Please place it manually.")
+
+        print("\n--- Processing Summary ---")
+        newly_downloaded_count = len(available_files) - len(self.skipped_files)
+
+        if newly_downloaded_count > 0:
+             print(f"Successfully downloaded {newly_downloaded_count} new file(s).")
+        if self.skipped_files:
+             print(f"Skipped download for {len(self.skipped_files)} existing file(s).")
+        if not available_files:
+             print("No database files are available in the target directory.")
+        elif newly_downloaded_count == 0 and not self.skipped_files:
+             # This case covers when only manually placed files were found
+             print(f"Found {len(available_files)} manually placed file(s). No downloads attempted.")
+
+
+        print(f"\nTotal available files: {len(available_files)}")
+        # Optionally list all available files
+        # for path in available_files:
+        #      print(f" - {os.path.basename(path)}") # Just show filename
+
+        return available_files

@@ -109,10 +109,32 @@ class WimmsMelanocyteParser:
             long_df["db_cell_id"] = None
             long_df["source_type"] = "literature"
             long_df["database"] = "wimms"
+            original_db_cell_names = long_df['db_cell_name'].copy()
+            long_df['db_cell_name'] = base_cell_name
 
             # --- Step 3: Use the BaseParser for normalization ---
             normalizer = BaseParser()
-            self.processed_df, self.recovery_df = normalizer.normalize_dataframe(long_df)
+            processed_df_temp, self.recovery_df = normalizer.normalize_dataframe(long_df)
+
+            # <<< 4. Restore original db_cell_name in the final DataFrame >>>
+            if len(processed_df_temp) == len(original_db_cell_names):
+                 processed_df_temp['db_cell_name'] = original_db_cell_names.values
+            else:
+                # Add more context to the warning
+                print(f"⚠️ Warning: Length mismatch after normalization in WIMMS parser.")
+                print(f"   Original length: {len(original_db_cell_names)}, Processed length: {len(processed_df_temp)}")
+                print("   Cannot reliably restore original db_cell_name. Check recovery logs for errors during normalization.")
+                if 'db_cell_name' in processed_df_temp.columns and len(processed_df_temp) > 0:
+                    print("   Attempting partial restore based on index (might be incorrect).")
+                    # Ensure index alignment if possible (might fail if rows were dropped)
+                    try:
+                        processed_df_temp['db_cell_name'] = original_db_cell_names.reindex(processed_df_temp.index).values
+                    except Exception as e:
+                        print(f"   Error during partial restore: {e}. 'db_cell_name' might be incorrect.")
+
+
+            self.processed_df = processed_df_temp 
+
         else:
             self.processed_df = pd.DataFrame()
             self.recovery_df = pd.DataFrame()

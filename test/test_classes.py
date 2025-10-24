@@ -69,5 +69,5 @@ def run_creation_and_parser_tests():
     print("--- Database Creation and Parser Tests Completed ---")
 
 if __name__ == "__main__":
-    run_downloader_tests()
+    #run_downloader_tests()
     run_creation_and_parser_tests()

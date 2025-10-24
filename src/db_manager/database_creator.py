@@ -29,7 +29,8 @@ try:
     from src.parser.panglaodb_parser import PanglaoParser
     from src.parser.wimms_parser import WimmsMelanocyteParser
     from src.parser.generic_parser import GenericFileParser
-
+    from src.parser.human_scc_cell_2020_parser import HumanSccCell2020Parser
+    
 except ImportError as e:
     print(f"❌ A critical import error occurred in database_creator.py: {e}")
     print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
@@ -42,7 +43,8 @@ PARSER_MAPPING = {
     "cellxgene": CellxGeneDBParser,
     "panglao": PanglaoParser,
     "wimms": WimmsMelanocyteParser,
-    "generic": GenericFileParser
+    "generic": GenericFileParser,
+    "human_scc_cell_2020": HumanSccCell2020Parser
 }
 
 class DatabaseCreate:
