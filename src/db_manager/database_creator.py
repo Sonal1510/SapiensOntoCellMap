@@ -20,7 +20,8 @@ try:
         PROCESSED_DATA_DIR,
         RECOVER_ID_DATA_DIR,
         PROCESSED_COMBINED_DATA_DIR,
-        DATABASE_CONFIG
+        DATABASE_CONFIG,
+        PROCESSED_COMBINED_DATABASE_FILE
     )
     # Import all parser classes that will be used
     from src.parser.cellmarkerdb_parser import CellMarkerDBParser
@@ -30,6 +31,7 @@ try:
     from src.parser.wimms_parser import WimmsMelanocyteParser
     from src.parser.generic_parser import GenericFileParser
     from src.parser.human_scc_cell_2020_parser import HumanSccCell2020Parser
+    from src.parser.skin_atlas_parser import SkinAtlasParser
     
 except ImportError as e:
     print(f"❌ A critical import error occurred in database_creator.py: {e}")
@@ -44,7 +46,8 @@ PARSER_MAPPING = {
     "panglao": PanglaoParser,
     "wimms": WimmsMelanocyteParser,
     "generic": GenericFileParser,
-    "human_scc_cell_2020": HumanSccCell2020Parser
+    "human_scc_cell_2020": HumanSccCell2020Parser,
+    "skin_atlas": SkinAtlasParser
 }
 
 class DatabaseCreate:
@@ -119,7 +122,7 @@ class DatabaseCreate:
                 print(f"Saved {name} recovery log to {output_path}")
 
         if not self.combined_df.empty:
-            combined_path = os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv")
+            combined_path = PROCESSED_COMBINED_DATABASE_FILE
             self.combined_df.to_csv(combined_path, index=False)
             print(f"Saved combined master database to {combined_path}")
         

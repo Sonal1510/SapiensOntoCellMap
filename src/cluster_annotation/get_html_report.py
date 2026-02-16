@@ -4,238 +4,195 @@ Author: Sonal Rashmi
 Date: 2025-10-06
 Description:
 A script to perform enrichment analysis and generate a comprehensive, interactive
-HTML report. The report includes a clustered heatmap, an interactive dot plot of
-significant enrichments, and a browser for differentially expressed genes (DEGs).
+HTML report.
+
+(MODIFIED: Visuals reverted to 'Old' style, Weighted Logic retained)
 """
 
 import pandas as pd
 import numpy as np
-import os
 import io
 import base64
 import re
 import logging
 import matplotlib
-matplotlib.use('Agg') # Use a non-interactive backend for scripts
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.gridspec as gridspec
 from scipy.cluster.hierarchy import linkage, dendrogram
 from jinja2 import Template
-from typing import Dict, List
 import plotly.express as px
-import plotly.graph_objects as go
+from typing import Dict, List, Tuple
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-# A small constant to prevent log(0) errors.
-_EPSILON = 1e-300
-
-# ==============================================================================
-# HELPER FUNCTION FOR SORTING
-# ==============================================================================
 def natural_sort_key(s: str):
-    """
-    Creates a key for sorting strings with numbers in a natural way.
-    Example: 'Cluster 10' comes after 'Cluster 2'.
-    """
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
 
-# ==============================================================================
-# CLUSTERED HEATMAP (MODIFIED WITH NEW DYNAMIC LOGIC)
-# ==============================================================================
 def plot_dynamic_heatmap_with_bars(
     sig_results_df: pd.DataFrame,
     top_n_celltypes: int = 1,
     cluster_axes: bool = True
 ) -> str:
     """
-    Generates a dynamic, publication-quality heatmap based on raw enrichment ratios.
+    Generates a heatmap with high resolution (300 DPI) but maintaining the old style/colors.
     """
     if sig_results_df.empty:
         return f"<h3>Heatmap (Top {top_n_celltypes})</h3><p>No significant enrichments found.</p>"
 
-    required_cols = ['Cluster', 'Cell_type', 'adj_p_value', 'Enrichment_ratio']
-    if not all(col in sig_results_df.columns for col in required_cols):
-        raise ValueError(f"Input DataFrame is missing one of the required columns: {required_cols}")
-
     df = sig_results_df.copy()
-    df['Enrichment_ratio'] = pd.to_numeric(df['Enrichment_ratio'], errors='coerce').fillna(0)
+    
+    # --- DYNAMIC METRIC SELECTION ---
+    if 'Weighted_Enrichment' in df.columns:
+        value_col = 'Weighted_Enrichment'
+        title_metric = "Weighted Enrichment"
+    else:
+        value_col = 'Enrichment_ratio'
+        title_metric = "Enrichment Ratio"
+        
+    required = ['Cluster', 'Cell_type', 'adj_p_value', value_col]
+    if not all(col in df.columns for col in required):
+         return f"<p>Error: Missing columns {required}</p>"
+
+    df[value_col] = pd.to_numeric(df[value_col], errors='coerce').fillna(0)
     df['adj_p_value'] = pd.to_numeric(df['adj_p_value'], errors='coerce')
+    
+    # Sort by P-value first, then Score
     df_sorted = df.sort_values(
-        by=['Cluster', 'adj_p_value', 'Enrichment_ratio'],
+        by=['Cluster', 'adj_p_value', value_col],
         ascending=[True, True, False]
     )
+    
     top_hits_per_cluster = df_sorted.groupby('Cluster').head(top_n_celltypes)
     top_cell_types_list = top_hits_per_cluster['Cell_type'].unique().tolist()
     top_sig_results = df[df['Cell_type'].isin(top_cell_types_list)]
+    
     heatmap_df = top_sig_results.pivot_table(
-        index='Cluster',
-        columns='Cell_type',
-        values='Enrichment_ratio',
-        fill_value=0
+        index='Cluster', columns='Cell_type', values=value_col, fill_value=0
     )
+    
     try:
-        all_clusters = df['Cluster'].unique()
-        sorted_clusters = sorted(all_clusters, key=natural_sort_key)
-        heatmap_df = heatmap_df.reindex(sorted_clusters, fill_value=0)
-    except (ValueError, IndexError):
+        sorted_clusters = sorted(df['Cluster'].unique(), key=natural_sort_key)
+        # Filter to only existing clusters in heatmap
+        existing = [c for c in sorted_clusters if c in heatmap_df.index]
+        heatmap_df = heatmap_df.reindex(existing, fill_value=0)
+    except:
         heatmap_df = heatmap_df.sort_index()
 
-    cbar_label = 'Enrichment_ratio'
-
     if cluster_axes and not heatmap_df.empty:
-        # --- START: Robust clustering fix ---
-        # The original code could fail if a row or column in the heatmap has
-        # zero variance (i.e., all values are the same), as this results in a
-        # NaN during correlation calculation, which `scipy.cluster.hierarchy.linkage`
-        # cannot handle.
-        # This revised logic separates data with variance from data without,
-        # clusters the valid data, and then appends the zero-variance data,
-        # preventing the crash while preserving all data in the final plot.
-
-        # Identify rows and columns that have variance and are suitable for clustering
-        rows_with_variance = heatmap_df.index[heatmap_df.std(axis=1) > 0]
-        cols_with_variance = heatmap_df.columns[heatmap_df.std(axis=0) > 0]
-
-        # Subset the dataframe to only the parts that can be clustered
-        clustered_df = heatmap_df.loc[rows_with_variance, cols_with_variance]
-
-        # Initialize final orderings with the original order
+        rows_var = heatmap_df.index[heatmap_df.std(axis=1) > 0]
+        cols_var = heatmap_df.columns[heatmap_df.std(axis=0) > 0]
+        clustered = heatmap_df.loc[rows_var, cols_var]
+        
         final_row_order = list(heatmap_df.index)
         final_col_order = list(heatmap_df.columns)
 
-        # Perform column clustering if there are at least two columns with variance
-        if len(cols_with_variance) > 1:
+        if len(cols_var) > 1:
             try:
-                col_linkage = linkage(clustered_df.T, method='average', metric='correlation')
-                col_dendrogram = dendrogram(col_linkage, no_plot=True, labels=clustered_df.columns)
-                # The new order for clustered columns
-                ordered_cols = col_dendrogram['ivl']
-                # Append columns that were not clustered (zero variance)
-                cols_without_variance = [c for c in heatmap_df.columns if c not in ordered_cols]
-                final_col_order = ordered_cols + cols_without_variance
-            except Exception as e:
-                logging.warning(f"Column clustering failed: {e}. Using default order.")
+                Z = linkage(clustered.T, method='average', metric='correlation')
+                D = dendrogram(Z, no_plot=True, labels=clustered.columns)
+                final_col_order = D['ivl'] + [c for c in heatmap_df.columns if c not in D['ivl']]
+            except: pass
 
-        # Perform row clustering if there are at least two rows with variance
-        if len(rows_with_variance) > 1:
+        if len(rows_var) > 1:
             try:
-                row_linkage = linkage(clustered_df, method='average', metric='correlation')
-                row_dendrogram = dendrogram(row_linkage, no_plot=True, labels=clustered_df.index)
-                # The new order for clustered rows
-                ordered_rows = row_dendrogram['ivl']
-                # Append rows that were not clustered (zero variance)
-                rows_without_variance = [r for r in heatmap_df.index if r not in ordered_rows]
-                final_row_order = ordered_rows + rows_without_variance
-            except Exception as e:
-                logging.warning(f"Row clustering failed: {e}. Using default order.")
-
-        # Reorder the original dataframe with the new, safe ordering.
-        # This ensures all original data is plotted, even if it couldn't be clustered.
+                Z = linkage(clustered, method='average', metric='correlation')
+                D = dendrogram(Z, no_plot=True, labels=clustered.index)
+                final_row_order = D['ivl'] + [r for r in heatmap_df.index if r not in D['ivl']]
+            except: pass
+            
         heatmap_df = heatmap_df.reindex(index=final_row_order, columns=final_col_order)
-        # --- END: Robust clustering fix ---
-
 
     cluster_freq = sig_results_df.groupby('Cluster')['Cell_type'].nunique().reindex(heatmap_df.index).fillna(0)
-    fig_height = max(8, len(heatmap_df.index) * 0.3)
-    fig_width = max(10, len(heatmap_df.columns) * 0.5)
-    fig = plt.figure(figsize=(fig_width, fig_height), layout="constrained")
+    
+    # Dynamic dimensions
+    fig_h = max(8, len(heatmap_df.index) * 0.3)
+    fig_w = max(10, len(heatmap_df.columns) * 0.5)
+    
+    fig = plt.figure(figsize=(fig_w, fig_h))
     gs = gridspec.GridSpec(1, 2, figure=fig, width_ratios=[1, 5], wspace=0.05)
     ax_bar = fig.add_subplot(gs[0])
     ax_heat = fig.add_subplot(gs[1], sharey=ax_bar)
 
+    # --- CRITICAL FIX: Wipe index name completely to prevent Seaborn from grabbing it ---
+    heatmap_df.index.name = ""
+    # -----------------------------------------------------------------------------------
+
     sns.heatmap(
         heatmap_df, ax=ax_heat, cmap='rocket_r', linewidths=.5, linecolor='lightgray',
-        cbar_kws={'label': cbar_label}, yticklabels=False, xticklabels=True
+        cbar_kws={'label': title_metric}, yticklabels=False, xticklabels=True
     )
+    
+    # --- [FIX APPLIED HERE] ---
+    # Explicitly turn off y-ticks/labels on the heatmap to prevent double labeling
+    ax_heat.tick_params(axis='y', which='both', left=False, labelleft=False)
+    # --------------------------
+
     ax_heat.set_title(
-        f'Significant Cluster Annotations (adj p < 0.05)\nTop {top_n_celltypes} Cell Type(s) per Cluster',
+        f'Significant Annotations (adj p < 0.05)\nTop {top_n_celltypes} per Cluster',
         fontsize=14, weight='bold', pad=20
     )
-    ax_heat.set_xlabel('Annotated Cell Type', fontsize=12, labelpad=10)
-    ax_heat.set_ylabel('Cluster', fontsize=12)
+    ax_heat.set_xlabel('Cell Type', fontsize=12)
+    
+    # --- CRITICAL FIX: Force removal of label on heatmap axis AFTER plotting ---
+    ax_heat.set_ylabel("") 
+    ax_heat.yaxis.set_label_text("")
+    # -------------------------------------------------------------------------
+    
     plt.setp(ax_heat.get_xticklabels(), rotation=90, ha='right', rotation_mode='anchor', fontsize=10)
 
-    y_pos = np.arange(len(heatmap_df.index))
-    y_pos_centered = y_pos + 0.5
-    bars = ax_bar.barh(y_pos_centered, cluster_freq.values, height=0.8, color="steelblue", edgecolor="black", linewidth=0.5)
-    ax_bar.set_yticks(y_pos_centered)
-    ax_bar.set_yticklabels(heatmap_df.index, fontsize=10, va='center')
-    ax_bar.set_xlabel("Significant Hits", fontsize=11)
-    ax_bar.set_ylabel("Cluster", fontsize=12)
+    y_pos = np.arange(len(heatmap_df.index)) + 0.5
+    bars = ax_bar.barh(y_pos, cluster_freq.values, height=0.8, color="steelblue", edgecolor="black")
+    ax_bar.set_yticks(y_pos)
+    ax_bar.set_yticklabels(heatmap_df.index)
     ax_bar.invert_yaxis()
+    ax_bar.set_xlabel("# Hits")
+    
+    # Label is ONLY here on the bar chart
+    ax_bar.set_ylabel("Cluster", fontsize=12) 
+    
     ax_bar.grid(axis='x', linestyle='--', alpha=0.6)
     for bar in bars:
         width = bar.get_width()
         if width > 0:
             ax_bar.text(width * 1.01, bar.get_y() + bar.get_height()/2., '%d' % int(width), ha='left', va='center', fontsize=8)
-    ax_bar.set_xlim(right=cluster_freq.max() * 1.15 if cluster_freq.max() > 0 else 1)
-
+            
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=200)
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=300)
     plt.close(fig)
     buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-    return f'<img src="data:image/png;base64,{img_base64}" alt="Enrichment Heatmap" style="width:100%; height:auto;">'
+    b64 = base64.b64encode(buf.read()).decode('utf-8')
+    return f'<img src="data:image/png;base64,{b64}" style="width:100%; height:auto;">'
 
-# ==============================================================================
-# DEG BROWSER PLOTS & TABLES
-# ==============================================================================
 def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
-    """Helper to standardize DEG data into a long format."""
-    # Check if already in 'scrna' long format
+    # Standardize DEG DF to long format
     if 'cluster' in deg_df.columns and 'gene' in deg_df.columns:
-        logging.info("Input DEG dataframe appears to be in long format. Standardizing columns.")
-        df_reshaped = deg_df.copy()
-        df_reshaped.rename(columns={'gene': 'Feature Name', 'cluster': 'Cluster', 'p_val_adj': 'adj_p_value', 'avg_log2FC': 'log2FC'}, inplace=True)
-        if 'mean_counts' not in df_reshaped.columns: 
-            df_reshaped['mean_counts'] = 0
-        if 'Feature ID' not in df_reshaped.columns: 
-            df_reshaped['Feature ID'] = df_reshaped['Feature Name']
-        df_reshaped['Cluster'] = "Cluster " + df_reshaped['Cluster'].astype(str)
-        return df_reshaped
+        df = deg_df.copy()
+        df.rename(columns={'gene':'Feature Name','cluster':'Cluster','p_val_adj':'adj_p_value','avg_log2FC':'log2FC'}, inplace=True)
+        if 'mean_counts' not in df.columns: df['mean_counts'] = 0
+        if 'Feature ID' not in df.columns: df['Feature ID'] = df['Feature Name']
+        df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
+        return df
+    
+    p_cols = [c for c in deg_df.columns if 'Adjusted p value' in c]
+    fc_cols = [c for c in deg_df.columns if 'Log2 fold change' in c]
+    mc_cols = [c for c in deg_df.columns if 'Mean Counts' in c]
+    
+    if not p_cols or not fc_cols:
+         raise ValueError("Missing P-value or Log2FC columns in spatial DEG file.")
 
-    # Logic for 'spatial' wide format
-    p_val_cols = [c for c in deg_df.columns if 'Adjusted p value' in c]
-    log2fc_cols = [c for c in deg_df.columns if 'Log2 fold change' in c]
-    mean_counts_cols = [c for c in deg_df.columns if 'Mean Counts' in c]
-
-    if not p_val_cols or not log2fc_cols: 
-        raise ValueError("Could not find required 'Adjusted p value' or 'Log2 fold change' columns for reshaping.")
-        
     id_vars = ['Feature ID', 'Feature Name']
-    value_vars = p_val_cols + log2fc_cols + mean_counts_cols
+    df_long = pd.melt(deg_df, id_vars=id_vars, value_vars=p_cols+fc_cols+mc_cols, var_name='metric', value_name='value')
+    df_long[['Cluster', 'Type']] = df_long['metric'].str.extract(r'(Cluster \d+)\s(.*)')
+    df_long.dropna(subset=['Cluster', 'Type'], inplace=True)
     
-    df_long = pd.melt(deg_df, id_vars=id_vars, value_vars=value_vars, var_name='metric', value_name='value')
-    
-    # Extract Cluster and Metric Type
-    df_long[['Cluster', 'Metric Type']] = df_long['metric'].str.extract(r'(Cluster \d+)\s(.*)')
-    df_long.dropna(subset=['Cluster', 'Metric Type'], inplace=True) # Drop rows that didn't match
-    
-    # Pivot to get metrics as columns
-    df_reshaped = df_long.pivot_table(index=id_vars + ['Cluster'], columns='Metric Type', values='value', aggfunc='first').reset_index()
-    
-    # Standardize column names
-    df_reshaped.rename(columns={'Adjusted p value': 'adj_p_value', 'Log2 fold change': 'log2FC', 'Mean Counts': 'mean_counts'}, inplace=True)
-    
-    if 'mean_counts' not in df_reshaped.columns: 
-        df_reshaped['mean_counts'] = 0
-        
-    # Ensure numeric types and fill NaNs
-    for col, dtype in {'adj_p_value': 'float', 'log2FC': 'float', 'mean_counts': 'float'}.items():
-        if col in df_reshaped.columns: 
-            df_reshaped[col] = pd.to_numeric(df_reshaped[col], errors='coerce')
-            
-    df_reshaped['mean_counts'] = df_reshaped['mean_counts'].fillna(0)
-    df_reshaped['adj_p_value'] = df_reshaped['adj_p_value'].fillna(1.0)
-    df_reshaped['log2FC'] = df_reshaped['log2FC'].fillna(0.0)
+    df = df_long.pivot_table(index=id_vars+['Cluster'], columns='Type', values='value', aggfunc='first').reset_index()
+    df.rename(columns={'Adjusted p value':'adj_p_value', 'Log2 fold change':'log2FC', 'Mean Counts':'mean_counts'}, inplace=True)
+    df.fillna({'mean_counts':0, 'adj_p_value':1, 'log2FC':0}, inplace=True)
+    return df
 
-    return df_reshaped
-
-def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
-    """Generates interactive violin plots for DEG distributions."""
+def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_counts_thresh):
     filtered_deg_df = deg_df_reshaped
     if filtered_deg_df.empty:
         return "<h3>DEG Distributions</h3><p>No significant DEGs found with the given thresholds.</p>"
@@ -248,7 +205,7 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
     custom_data_cols = ['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts']
     hover_template = '<b>%{customdata[0]}</b><br>Cluster: %{x}<br>Adj p-value: %{customdata[1]:.2e}<br>Log2FC: %{customdata[2]:.2f}<br>Mean Counts: %{customdata[3]:.2f}<extra></extra>'
 
-    # --- Plot 1: Adjusted p-value (Log Scale with Visual Floor) ---
+    # --- Plot 1: Adjusted p-value (LINEAR SCALE as requested) ---
     fig_p_val = px.violin(
         filtered_deg_df, x='Cluster', y='adj_p_value', box=True, points='all',
         title='Adjusted p-value Distribution', color='Cluster',
@@ -258,29 +215,14 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
         points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
-
-    # Set a visual floor to prevent extreme outliers from crushing the y-axis scale,
-    # which allows the shape of the main distribution to be visible.
-    p_val_floor = 1e-100
-    non_zero_pvals = filtered_deg_df['adj_p_value'][filtered_deg_df['adj_p_value'] > 0]
-    yaxis_pval_dict = dict(
-        title_text='Adjusted p-value (Log Scale)',
-        type="log",
-        tickformat=".1e"
-    )
-    if not non_zero_pvals.empty:
-        min_pval_for_display = max(non_zero_pvals.min(), p_val_floor)
-        max_pval_range = non_zero_pvals.max() + 10
-        yaxis_pval_dict['range'] = [np.log10(min_pval_for_display), np.log10(max_pval_range)]
-
-    fig_p_val.update_layout(xaxis_title='', yaxis=yaxis_pval_dict)
+    # Reverting to Linear scale as requested by "let it be adj pvalue instead of log"
+    fig_p_val.update_layout(xaxis_title='', yaxis=dict(title_text='Adjusted p-value'))
     fig_p_val.add_hline(
         y=p_val_thresh, line_dash="dash", line_color="red",
         annotation_text=f"p-value threshold = {p_val_thresh}", annotation_position="top left"
     )
 
-    # --- Plot 2: Log2 Fold Change (Manual Symlog with Wider Linear Range) ---
-    # Increased C to 1.0 to make the linear region (-1 to 1) wider, improving visibility for smaller fold changes.
+    # --- Plot 2: Log2 Fold Change (Symlog) ---
     C = 1.0
     symlog_transform = lambda x: np.sign(x) * np.log1p(np.abs(x / C))
     filtered_deg_df['log2FC_transformed'] = symlog_transform(filtered_deg_df['log2FC'])
@@ -320,103 +262,33 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
     )
     fig_log2fc.add_hline(
         y=symlog_transform(log2fc_thresh), line_dash="dash", line_color="red",
-        annotation_text=f"Upregulated Log₂FC threshold = {log2fc_thresh}", annotation_position="bottom right"
+        annotation_text=f"Threshold = {log2fc_thresh}", annotation_position="bottom right"
     )
 
-    p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn')
-    log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
-
-    # ==========================================================================
-    # START: REVISED MEAN COUNTS PLOT
-    # ==========================================================================
+    # --- Plot 3: Mean Counts (Box Plot) ---
     mean_counts_html = ""
-    # Only generate the plot if the column exists and has non-zero data
     if 'mean_counts' in filtered_deg_df.columns and filtered_deg_df['mean_counts'].sum() > 1e-6:
-        # --- Create Plot: Use a box plot for better readability with outliers ---
         fig_mean_counts = px.box(
-            filtered_deg_df,
-            x='Cluster',
-            y='mean_counts',
-            color='Cluster',
-            points='outliers',  # Show only outliers, not all points
-            custom_data=custom_data_cols
+            filtered_deg_df, x='Cluster', y='mean_counts',
+            color='Cluster', points='outliers', custom_data=custom_data_cols
         )
-
-        # --- Update Traces: Customize hover info and marker style ---
         fig_mean_counts.update_traces(
-            hovertemplate=hover_template,
-            marker=dict(opacity=0.7, size=4)  # Style for outlier points
+            hovertemplate=hover_template, marker=dict(opacity=0.7, size=4)
         )
-
-        # --- Y-axis Logic: Set a robust log-scale range and clean tick labels ---
-        counts_floor = 1e-4  # A reasonable floor for expression counts
-        non_zero_counts = filtered_deg_df['mean_counts'][filtered_deg_df['mean_counts'] > 0]
-
-        yaxis_counts_dict = dict(
-            title_text='Mean Counts (Log Scale)',
-            type="log",
-        )
-
-        if not non_zero_counts.empty:
-            # Use quantiles to set a y-axis range robust to extreme outliers
-            q_low = non_zero_counts.quantile(0.005) # Use 0.5 percentile
-            q_high = non_zero_counts.quantile(0.995) # Use 99.5 percentile
-
-            min_for_display = max(q_low, counts_floor)
-
-            # Add padding to the range
-            range_min_val = min_for_display * 0.5
-            range_max_val = q_high * 2.0
-
-            if range_max_val > range_min_val:
-                yaxis_counts_dict['range'] = [np.log10(range_min_val), np.log10(range_max_val)]
-
-                # --- Generate clean, publication-ready tick marks as powers of 10 ---
-                min_power = np.floor(np.log10(range_min_val))
-                max_power = np.ceil(np.log10(range_max_val))
-
-                tick_values = [10**i for i in range(int(min_power), int(max_power) + 1)]
-                tick_values = [v for v in tick_values if range_min_val <= v <= range_max_val]
-
-                if tick_values:
-                    yaxis_counts_dict['tickvals'] = tick_values
-                    yaxis_counts_dict['ticktext'] = [f'{v:g}' for v in tick_values]
-
-        # --- Layout Update: Apply publication-quality aesthetics ---
+        
         fig_mean_counts.update_layout(
-            title_text='Distribution of Mean Gene Counts per Cluster',
-            xaxis_title='Cluster',
-            yaxis=yaxis_counts_dict,
-            showlegend=False,  # Legend is redundant with x-axis colors
-            template='simple_white',
-            font=dict(size=12),
-            title=dict(x=0.5, font=dict(size=16)) # Center title
+            title_text='Distribution of Mean Gene Counts per Cluster', xaxis_title='Cluster',
+            yaxis=dict(title_text='Mean Counts (Log Scale)', type="log"), showlegend=False
         )
-
         if mean_counts_thresh > 0:
-            # ==================================================================
-            # START: FIX FOR INVISIBLE RED LINE
-            # ==================================================================
-            # Key Fix: Set layer='above' to ensure the line is drawn on top of
-            # the box plots, as the default 'below' layer is hidden by the
-            # filled boxes. Also, explicitly set line_width for visibility.
             fig_mean_counts.add_hline(
-                y=mean_counts_thresh,
-                line_dash="dash",
-                line_color="red",
-                line_width=2,
-                layer="above", # This ensures the line is visible on top of the boxes
-                annotation_text=f"Mean counts threshold = {mean_counts_thresh:.2f}",
-                annotation_position="top right" # Position annotation for clarity
+                y=mean_counts_thresh, line_dash="dash", line_color="red", line_width=2,
+                annotation_text=f"Threshold = {mean_counts_thresh:.2f}"
             )
-            # ==================================================================
-            # END: FIX FOR INVISIBLE RED LINE
-            # ==================================================================
-
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
-    # ==========================================================================
-    # END: REVISED MEAN COUNTS PLOT
-    # ==========================================================================
+
+    p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn') # include JS here once
+    log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
 
     combined_html = f"""
     <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
@@ -428,158 +300,102 @@ def create_deg_violin_plots(deg_df_reshaped: pd.DataFrame, p_val_thresh: float, 
         """
     return combined_html
 
-
-def create_deg_tables_html(deg_df: pd.DataFrame, cluster_markers: Dict[str, List[str]], p_val_thresh: float, log2fc_thresh: float, mean_counts_thresh: float) -> str:
-    """Creates the HTML for the DEG Browser tab, including plots and tables."""
-    
-    # 1. Standardize the raw DEG dataframe
-    deg_df_reshaped = _reshape_deg_df(deg_df)
-    
-    # 2. Generate distribution plots
-    dist_plots_html = create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_counts_thresh)
-    
-    # 3. Generate DEG counts bar chart
-    bar_plot_html = plot_deg_counts_barchart(cluster_markers)
-    
-    # 4. Create cluster dropdown
-    dropdown_parts = ['<label for="cluster_select"><b>Select a Cluster to view its DEGs:</b></label>', 
-                      '<select id="cluster_select" onchange="showTable(this.value)">']
-    cluster_names = sorted(cluster_markers.keys(), key=natural_sort_key)
-    dropdown_parts.append('<option value="">--Select--</option>')
-    for cluster in cluster_names:
-        sanitized_cluster_name = re.sub(r'\s+', '_', str(cluster))
-        dropdown_parts.append(f'<option value="deg_table_{sanitized_cluster_name}">{cluster} ({len(cluster_markers.get(cluster,[]))} genes)</option>')
-    dropdown_parts.append('</select>')
-    
-    # 5. Create hidden DEG tables for each cluster
-    table_parts = []
-    
-    # Use the reshaped long-form dataframe for easier filtering
-    for cluster in cluster_names:
-        genes = cluster_markers.get(cluster, [])
-        if not genes: 
-            continue
-            
-        sanitized_cluster_name = re.sub(r'\s+', '_', str(cluster))
-        
-        # Filter the long-form dataframe for the current cluster and its significant genes
-        cluster_deg_df = deg_df_reshaped[
-            (deg_df_reshaped['Cluster'] == cluster) &
-            (deg_df_reshaped['Feature Name'].isin(genes))
-        ].copy()
-
-        # Select and rename columns for the final table
-        cols_to_show = ['Feature Name', 'adj_p_value', 'log2FC']
-        if 'mean_counts' in cluster_deg_df.columns and cluster_deg_df['mean_counts'].sum() > 1e-6:
-             cols_to_show.append('mean_counts')
-             
-        cluster_deg_df = cluster_deg_df[cols_to_show]
-        
-        rename_map = {
-            'Feature Name': 'Gene',
-            'adj_p_value': 'Adjusted p-value',
-            'log2FC': 'Log2 Fold Change',
-            'mean_counts': 'Mean Counts'
-        }
-        cluster_deg_df.rename(columns=rename_map, inplace=True)
-        
-        # Define formatting for the table
-        float_formatters = {
-            'Adjusted p-value': '{:.2e}'.format,
-            'Log2 Fold Change': '{:.2f}'.format,
-            'Mean Counts': '{:.2f}'.format
-        }
-        
-        table_html = cluster_deg_df.to_html(
-            classes="display compact", 
-            index=False, 
-            table_id=f"deg_table_{sanitized_cluster_name}_data", 
-            formatters=float_formatters,
-            float_format='{:.2e}'.format # Fallback for any other floats
-        )
-        
-        table_parts.append(f'<div id="deg_table_{sanitized_cluster_name}" class="deg-table-container" style="display:none;"><h4>DEGs for {cluster}</h4>{table_html}</div>')
-
-    return dist_plots_html + bar_plot_html + ''.join(dropdown_parts) + ''.join(table_parts)
-
-def plot_deg_counts_barchart(cluster_markers: Dict[str, List[str]]) -> str:
-    """Generates a bar chart showing the number of DEGs per cluster."""
-    if not cluster_markers: 
-        return ""
-        
-    deg_counts = pd.Series({cluster: len(genes) for cluster, genes in cluster_markers.items()})
-    deg_counts = deg_counts[deg_counts > 0]
-    
-    if deg_counts.empty: 
-        return "<h3>DEGs per Cluster</h3><p>No differentially expressed genes found for any cluster.</p>"
-        
-    sorted_index = sorted(deg_counts.index, key=natural_sort_key)
-    deg_counts = deg_counts.reindex(sorted_index)
-    
-    fig = px.bar(
-        x=deg_counts.index, 
-        y=deg_counts.values, 
-        title='Number of Genes per Cluster for Hypergeometric Test', 
-        labels={'x': 'Cluster', 'y': 'Number of Genes'}, 
-        color=deg_counts.index, 
-        text=deg_counts.values
-    )
+def plot_deg_counts_barchart(markers):
+    if not markers: return ""
+    s = pd.Series({k:len(v) for k,v in markers.items()})
+    s = s.reindex(sorted(s.index, key=natural_sort_key))
+    fig = px.bar(x=s.index, y=s.values, title="DEGs per Cluster", 
+                 labels={'x':'Cluster', 'y':'Count'}, color=s.index)
     fig.update_layout(showlegend=False)
     fig.update_traces(marker_color='steelblue')
-    
-    return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False)}<hr style="margin: 25px 0;">'
+    return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False, include_plotlyjs=False)}<hr style="margin: 25px 0;">'
 
-def generate_html_report(sample_name, output_path, sig_results_df, plots_html, deg_table_html, params):
-    """Generates the final HTML report file."""
+def create_deg_tables_html(deg_df, cluster_markers, p_val_thresh, log2fc_thresh, mean_counts_thresh):
+    reshaped = _reshape_deg_df(deg_df)
     
-    df_for_html = sig_results_df.copy()
+    # Generate Plots
+    plots = create_deg_violin_plots(reshaped, p_val_thresh, log2fc_thresh, mean_counts_thresh)
+    bar = plot_deg_counts_barchart(cluster_markers)
     
-    # Sort the results table by cluster (natural sort) and then p-value
-    if 'Cluster' in df_for_html.columns:
-        unique_clusters = df_for_html['Cluster'].unique()
-        sorted_clusters = sorted(unique_clusters, key=natural_sort_key)
-        cat_type = pd.api.types.CategoricalDtype(categories=sorted_clusters, ordered=True)
-        df_for_html['Cluster'] = df_for_html['Cluster'].astype(cat_type)
-        df_for_html.sort_values(by=['Cluster', 'adj_p_value'], inplace=True)
+    # Generate Dropdown and Tables
+    dropdown = ['<label for="cluster_select"><b>Select a Cluster to view its DEGs:</b></label>', 
+                '<select id="cluster_select" onchange="showTable(this.value)">']
+    tables = []
+    
+    for cl in sorted(cluster_markers.keys(), key=natural_sort_key):
+        safe_cl = re.sub(r'\s+','_',str(cl))
+        dropdown.append(f'<option value="deg_table_{safe_cl}">{cl} ({len(cluster_markers[cl])} genes)</option>')
         
-    # ==========================================================================
-    # START: BUG FIX 1
-    # The column name from get_marker_enrichment_test.py is 'Overlapping_genes',
-    # not 'Overlapping Genes'. This ensures the expandable row feature will work.
-    # ==========================================================================
-    has_genes_col = 'Overlapping_genes' in df_for_html.columns
-    if has_genes_col:
-        gene_limit = 10
-        def truncate_for_table(gene_string):
-            if not isinstance(gene_string, str) or not gene_string: return ""
-            genes = [g.strip() for g in gene_string.replace(';',',').split(',') if g.strip()]
-            return f"{', '.join(genes[:gene_limit])}, ..." if len(genes) > gene_limit else ', '.join(genes)
+        # Filter
+        sub = reshaped[(reshaped['Cluster']==cl) & (reshaped['Feature Name'].isin(cluster_markers[cl]))].copy()
         
-        # Use the correct column name 'Overlapping_genes'
-        df_for_html['Full Gene List'] = df_for_html['Overlapping_genes']
-        df_for_html['Overlapping_genes'] = df_for_html['Full Gene List'].apply(truncate_for_table)
-        df_for_html.insert(0, '', '') # Add placeholder for the '+' icon column
-    # ==========================================================================
-    # END: BUG FIX 1
-    # ==========================================================================
+        # Format
+        sub.rename(columns={'Feature Name':'Gene','adj_p_value':'Adjusted p-value','log2FC':'Log2 Fold Change','mean_counts':'Mean Counts'}, inplace=True)
+        cols = ['Gene','Adjusted p-value','Log2 Fold Change']
+        if 'Mean Counts' in sub.columns and sub['Mean Counts'].sum() > 0: cols.append('Mean Counts')
+        
+        tables.append(f'<div id="deg_table_{safe_cl}" class="deg-table-container" style="display:none;"><h4>DEGs for {cl}</h4>{sub[cols].to_html(classes="display compact", index=False, table_id=f"deg_table_{safe_cl}_data", formatters={"Adjusted p-value":"{:.2e}".format, "Log2 Fold Change":"{:.2f}".format, "Mean Counts":"{:.2f}".format})}</div>')
+        
+    dropdown.append('</select>')
+    
+    return plots + bar + "".join(dropdown) + "".join(tables)
 
-    # Define number formats for the final table
-    formatters = {
-        'p_value': '{:.2e}'.format,
-        'Enrichment_ratio': '{:.3f}'.format,
-        'adj_p_value': '{:.2e}'.format
+def _prepare_sig_table(df, tid):
+    if df.empty: return "<p>No significant results.</p>", False
+    d = df.copy()
+    
+    if 'Cluster' in d.columns:
+        cats = sorted(d['Cluster'].unique(), key=natural_sort_key)
+        d['Cluster'] = d['Cluster'].astype(pd.api.types.CategoricalDtype(categories=cats, ordered=True))
+        
+        sort_cols = ['Cluster', 'adj_p_value']
+        asc = [True, True]
+        
+        if 'Weighted_Enrichment' in d.columns:
+            sort_cols.append('Weighted_Enrichment')
+            asc.append(False)
+        else:
+            sort_cols.append('Enrichment_ratio')
+            asc.append(False)
+            
+        d.sort_values(by=sort_cols, ascending=asc, inplace=True)
+
+    has_genes = 'Overlapping_genes' in d.columns
+    if has_genes:
+        d['Full Gene List'] = d['Overlapping_genes']
+        d['Overlapping_genes'] = d['Overlapping_genes'].apply(lambda x: (str(x)[:40] + '...') if len(str(x))>40 else x)
+        d.insert(0, '', '')
+
+    fmts = {
+        'p_value': '{:.2e}'.format, 
+        'adj_p_value': '{:.2e}'.format, 
+        'Enrichment_ratio': '{:.2f}'.format, 
+        'Weighted_Enrichment': '{:.2f}'.format,
+        'Weighted_Recall': '{:.2f}'.format
     }
-    
-    # Convert dataframe to HTML table string
-    sig_table_html = df_for_html.to_html(
+            
+    html = d.to_html(
         classes="display compact", 
         index=False, 
-        table_id="results_table",
-        formatters=formatters,
-        float_format='{:.2e}'.format # Fallback for any other floats
+        table_id=tid, 
+        formatters=fmts, 
+        float_format='{:.3f}'.format
     )
+    return html, has_genes
 
-    template_str = """
+def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_maps, deg_table_html, params_maps, selected_tissue_name=None):
+    report_data = {}
+    for ctx, levels in sig_results_maps.items():
+        report_data[ctx] = {}
+        for lvl, res in levels.items():
+            tid = f"results_table_{ctx}_{lvl}"
+            html, genes = _prepare_sig_table(res, tid)
+            report_data[ctx][lvl] = {
+                'table': html, 'has_genes': genes, 'id': tid,
+                'plots': plots_html_maps[ctx][lvl], 'params': params_maps[ctx][lvl]
+            }
+
+    t = """
     <!DOCTYPE html>
     <html><head><title>{{ sample_name }} Report</title>
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -589,206 +405,202 @@ def generate_html_report(sample_name, output_path, sig_results_df, plots_html, d
         <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
         <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
         <style> 
             body{font-family:Arial,sans-serif;margin:0;padding:0;background-color:#f8f9fa} 
             .container{width:95%;margin:20px auto;padding:20px;background-color:#fff;box-shadow:0 4px 8px #0000001a;border-radius:8px} 
             header{border-bottom:3px solid #007bff;padding-bottom:15px;margin-bottom:20px} 
             h1,h2,h3{color:#0056b3} 
             h2{border-bottom:2px solid #e9ecef;padding-bottom:8px;margin-top:40px} 
+            
+            /* OLD STYLE TABS */
             .tabs{display:flex;border-bottom:1px solid #ccc} 
-            .tab-link{padding:10px 20px;cursor:pointer;background:#f1f1f1;border-bottom:none} 
-            .tab-link.active{background:#fff;border:1px solid #ccc;border-bottom:1px solid #fff;position:relative;top:1px} 
+            .tab-link{padding:10px 20px;cursor:pointer;background:#f1f1f1;border-bottom:none; margin-right: 2px;} 
+            .tab-link.active{background:#fff;border:1px solid #ccc;border-bottom:1px solid #fff;position:relative;top:1px; font-weight: bold;} 
             .tab-content{display:none;padding:20px;border:1px solid #ddd;border-top:none} 
             .tab-content.active{display:block} 
-            .params{background-color:#e9ecef;padding:15px;border-radius:5px;margin-bottom:20px} 
+            
+            .params{background-color:#e9ecef;padding:15px;border-radius:5px;margin-bottom:20px; display:none;} 
             .plot-controls{margin-bottom:15px;} 
-            .plot-controls label{font-weight:bold; margin-right:10px;} 
+            .plot-controls label, .level-selector label{font-weight:bold; margin-right:10px;} 
+            .level-selector{padding: 10px; background-color: #f9f9f9; border-bottom: 1px solid #ddd; margin-bottom: 15px;}
+            
             td.dt-control { background: url('https://datatables.net/examples/resources/details_open.png') no-repeat center center; cursor: pointer; } 
-            tr.dt-hasChild td.dt-control { background: url('https://datatables.net/examples/resources/details_close.png') no-repeat center center; } 
+            tr.shown td.dt-control { background: url('https://datatables.net/examples/resources/details_close.png') no-repeat center center; } 
+            .view-section { display: none; }
         </style>
     </head><body>
     <div class="container">
         <header><h1>Enrichment Analysis Report</h1><h2>Sample: <strong>{{ sample_name }}</strong></h2></header>
-        <div class="params"><strong>DEG Selection Parameters:</strong> 
-            Adj. p-value &le; {{ params.p_val }} | 
-            Log2FC (Upregulated) &ge; {{ params.log2fc }} | 
-            Mean Counts &ge; {{ "%.3f"|format(params.mean_counts) }}
-            {% if params.top_n_genes and params.top_n_genes > 0 %} | Top {{ params.top_n_genes }} Genes per Cluster{% endif %}
-        </div>
         
+        {% for context, levels in report_data.items() %}
+            {% for level, data in levels.items() %}
+            <div id="params_{{ context }}_{{ level }}" class="params">
+                <strong>Filters:</strong> Adj. p-value &le; {{ data.params.p_val }} | Log2FC &ge; {{ data.params.log2fc }} | Mean Counts &ge; {{ "%.3f"|format(data.params.mean_counts) }}
+            </div>
+            {% endfor %}
+        {% endfor %}
+
         <div class="tabs"> 
             <div class="tab-link active" onclick="openTab(event, 'degs')">DEG Browser</div> 
             <div class="tab-link" onclick="openTab(event, 'visuals')">Enrichment Visuals</div> 
             <div class="tab-link" onclick="openTab(event, 'results')">Hypergeometric Result</div> 
         </div>
         
-        <div id="degs" class="tab-content active">
-            {{ deg_tables|safe }}
+        <div id="degs" class="tab-content active">{{ deg_tables|safe }}</div>
+        
+        <div id="global_controls" style="display:none;">
+             <div class="level-selector">
+                <label>1. Tissue Scope:</label>
+                <select id="tissue_select" onchange="updateView()">
+                    <option value="all_tissue" selected>All Tissue</option>
+                    {% if selected_tissue_name %}<option value="selected_tissue">Selected Tissue ({{ selected_tissue_name }})</option>{% endif %}
+                </select>
+                <span style="margin: 0 15px; border-left: 1px solid #ccc;"></span>
+                <label>2. Annotation Level:</label>
+                <select id="level_select" onchange="updateView()">
+                    <option value="level1" selected>Level 1 (Granular/Conventional)</option>
+                    <option value="level2">Level 2 (Broad/Weighted)</option>
+                </select>
+            </div>
         </div>
         
         <div id="visuals" class="tab-content">
-            <div class="plot-controls"> 
-                <label for="heatmap_top_n_select">Heatmap Top N:</label> 
-                <select id="heatmap_top_n_select" onchange="showPlot('heatmap', this.value)"> 
-                    {% for n_key in plots.heatmap.keys() %}
-                    <option value="{{ n_key }}" {% if loop.first %}selected{% endif %}>{{ n_key }}</option>
-                    {% endfor %} 
-                </select> 
-            </div>
-            {% for n_key, plot_html in plots.heatmap.items() %}
-            <div id="heatmap_{{ n_key }}" class="plot-container heatmap-plot" style="display: {% if loop.first %}block{% else %}none{% endif %};">
-                {{ plot_html|safe }}
-            </div>
+            <div id="visuals_controls_placeholder"></div>
+            {% for context, levels in report_data.items() %}
+                {% for level, data in levels.items() %}
+                <div id="visuals_{{ context }}_{{ level }}" class="view-section visuals-section">
+                    <div class="plot-controls"> 
+                        <label>Heatmap Top N:</label> 
+                        <select onchange="showPlot('{{ context }}_{{ level }}', this.value)"> 
+                            {% for n_key in data.plots.heatmap.keys() %}
+                            <option value="{{ n_key }}" {% if loop.first %}selected{% endif %}>{{ n_key }}</option>
+                            {% endfor %} 
+                        </select> 
+                    </div>
+                    {% for n_key, plot_html in data.plots.heatmap.items() %}
+                    <div id="heatmap_{{ context }}_{{ level }}_{{ n_key }}" class="plot-container plot-group-{{ context }}-{{ level }}" style="display: {% if loop.first %}block{% else %}none{% endif %};">
+                        {{ plot_html|safe }}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
             {% endfor %}
         </div>
         
         <div id="results" class="tab-content">
-            <div style="margin-bottom: 15px;"> 
-                <label for="top_n_select"><b>Show Top N Hits per Cluster:</b></label> 
-                <select id="top_n_select" onchange="filterTopNResults()">
-                    <option value="1">1</option>
-                    <option value="3">3</option>
-                    <option value="5" selected>5</option>
-                    <option value="10">10</option>
-                    <option value="all">Show All</option>
-                </select> 
-            </div>
-            {{ sig_table|safe }}
+            <div id="results_controls_placeholder"></div>
+            {% for context, levels in report_data.items() %}
+                {% for level, data in levels.items() %}
+                <div id="results_{{ context }}_{{ level }}" class="view-section results-section">
+                    {{ data.table|safe }}
+                </div>
+                {% endfor %}
+            {% endfor %}
         </div>
     </div>
     
     <script> 
-    function openTab(e,t){
-        let n,c,l;
-        for(c=document.getElementsByClassName("tab-content"),n=0;n<c.length;n++)c[n].style.display="none";
-        for(l=document.getElementsByClassName("tab-link"),n=0;n<l.length;n++)l[n].className=l[n].className.replace(" active","");
-        document.getElementById(t).style.display="block";
-        e.currentTarget.className+=" active"
+    function openTab(e, tabName){
+        let i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tab-content");
+        for(i=0; i<tabcontent.length; i++) tabcontent[i].style.display = "none";
+        tablinks = document.getElementsByClassName("tab-link");
+        for(i=0; i<tablinks.length; i++) tablinks[i].className = tablinks[i].className.replace(" active", "");
+        document.getElementById(tabName).style.display = "block";
+        e.currentTarget.className += " active";
+        
+        var controls = document.getElementById('global_controls');
+        if(tabName === 'visuals') {
+            controls.style.display = 'block';
+            document.getElementById('visuals_controls_placeholder').appendChild(controls);
+        } else if (tabName === 'results') {
+            controls.style.display = 'block';
+            document.getElementById('results_controls_placeholder').appendChild(controls);
+        } else {
+            controls.style.display = 'none';
+        }
+        
+        // Resize plotly charts when tab becomes visible
+        window.dispatchEvent(new Event('resize'));
     } 
+
+    function updateView() {
+        var tissue = document.getElementById('tissue_select').value;
+        var level = document.getElementById('level_select').value;
+        $('.view-section').hide();
+        $('.params').hide();
+        $('#visuals_' + tissue + '_' + level).show();
+        $('#results_' + tissue + '_' + level).show();
+        $('#params_' + tissue + '_' + level).show();
+    }
+
+    function showPlot(groupKey, nVal){
+        $('.plot-group-' + groupKey.replace('_', '-')).hide(); 
+        $('#heatmap_' + groupKey + '_' + nVal).show();
+    }
     
     function showTable(id){
         $(".deg-table-container").hide();
         if(id){
-            $("#"+id.replace(/[\\s'"]/g, '_')).show();
-            var tableId="#"+id.replace(/[\\s'"]/g, '_')+"_data";
+            var safeId = id.replace(/[\\s'"]/g, '_');
+            $("#"+safeId).show();
+            var tableId="#"+safeId+"_data";
             if(!$.fn.DataTable.isDataTable(tableId)){
                 $(tableId).DataTable({pageLength:10,dom:"Bfrtip",buttons:["copy","csv"]})
             }
         }
     } 
     
-    function showPlot(e,t){
-        for(var l=document.getElementsByClassName(e+"-plot"),a=0;a<l.length;a++)l[a].style.display="none";
-        document.getElementById(e+"_"+t).style.display="block"
-    } 
-    
-    var resultsTable,allResultsData=[]; 
-    
-    // ==========================================================================
-    // START: BUG FIX 2 - Corrected JavaScript function
-    // ==========================================================================
-    function filterTopNResults(){
-        if(!resultsTable)return;
-        var e=$("#top_n_select").val();
-        resultsTable.rows().every(function(){this.child.isShown()&&this.child.hide()});
-        
-        if("all"===e){
-            resultsTable.clear().rows.add(allResultsData).draw();
-            return
-        }
-        
-        var t=parseInt(e,10),
-            l=resultsTable.columns().header().toArray().map(e=>$(e).text()),
-            a=l.indexOf("Cluster"),
-            r=l.indexOf("adj_p_value"),
-            // FIX: Was "Enrichment Ratio", changed to "Enrichment_ratio"
-            s=l.indexOf("Enrichment_ratio"); 
-            
-        if(-1===a||-1===r||-1===s){
-            // Added console.error for debugging
-            console.error("Required columns for filtering not found (Cluster, adj_p_value, Enrichment_ratio):",a,r,s);
-            resultsTable.clear().rows.add(allResultsData).draw(); // Fallback
-            return;
-        }
-        
-        var o=allResultsData.reduce((e,t)=>(e[t[a]]=e[t[a]]||[],e[t[a]].push(t),e),{}),
-            n=[];
-        var c=Object.keys(o);
-        // Add natural sort for cluster names
-        c.sort((e,t)=>e.localeCompare(t,void 0,{numeric:!0,sensitivity:"base"}));
-        
-        for(const i of c){
-            var d=o[i];
-            d.sort((e,t)=>{
-                let l=parseFloat(e[r])-parseFloat(t[r]); // Sort by p-value asc
-                if (0!==l) return l;
-                // If p-val is a tie, sort by enrichment ratio desc
-                return parseFloat(t[s])-parseFloat(e[s]) 
-            });
-            n.push(...d.slice(0,t))
-        }
-        resultsTable.clear().rows.add(n).draw()
-    } 
-    // ==========================================================================
-    // END: BUG FIX 2
-    // ==========================================================================
-
     $(document).ready(function(){
-        var e={{'true' if has_genes_col else 'false'}};
-        if($("#results_table").length){
-            var t=[],l=-1;
-            if(e){
-                var a=Array.from($("#results_table thead th")).map(e=>$(e).text());
-                (l=a.indexOf("Full Gene List"))>-1&&t.push({targets:l,visible:!1});
-                t.push({targets:0,className:"dt-control",orderable:!1,data:null,defaultContent:""})
-            }
-            resultsTable=$("#results_table").DataTable({
-                pageLength:25,
-                dom:"Bfrtip",
-                buttons:["copy","csv","excel"],
-                columnDefs:t,
-                order:e?[[1,"asc"]]:[[0,"asc"]] // Sort by Cluster col
-            });
-            
-            // Store all data *after* DataTables initialization
-            allResultsData=resultsTable.rows().data().toArray();
-            
-            // Apply the default filter ("Top 5") on page load
-            filterTopNResults();
-            
-            // Setup listener for the '+' icon (expand row)
-            if(e&&l>-1){
-                $("#results_table tbody").on("click","td.dt-control",function(){
-                    var e=$(this).closest("tr"),t=resultsTable.row(e);
-                    if(t.child.isShown()){
-                        t.child.hide();
-                        e.removeClass("dt-hasChild");
-                    } else {
-                        var a=resultsTable.cell(t.index(),l).data();
-                        var s='<div style="padding: 8px 30px; background-color: #f9f9f9; border-left: 3px solid #007bff;"><b>Full List of Overlapping Genes:</b><br><p style="word-break: break-word; white-space: normal; margin-top: 5px;">'+a+"</p></div>";
-                        t.child(s).show();
-                        e.addClass("dt-hasChild");
+        {% for context, levels in report_data.items() %}
+            {% for level, data in levels.items() %}
+            (function(){
+                var tableId = "#{{ data.id }}";
+                var has_genes = {{ 'true' if data.has_genes else 'false' }};
+                if($(tableId).length){
+                    var t = $(tableId).DataTable({
+                        pageLength: 25, dom: "Bfrtip", buttons: ["copy", "csv", "excel"]
+                    });
+                    
+                    if(has_genes){
+                        var gIdx = -1;
+                        $(tableId + ' thead th').each(function(i){ if($(this).text()=='Full Gene List') gIdx=i; });
+                        
+                        if(gIdx > -1){
+                            t.column(gIdx).visible(false);
+                            $(tableId + ' tbody').on('click', 'td.dt-control', function(){
+                                var tr = $(this).closest('tr'), row = t.row(tr);
+                                if(row.child.isShown()){ row.child.hide(); tr.removeClass('shown'); }
+                                else {
+                                    var g = t.cell(row.index(), gIdx).data();
+                                    row.child('<div style="background:#f9f9f9;padding:10px;border-left:4px solid #007bff"><b>Genes:</b><br>'+g+'</div>').show();
+                                    tr.addClass('shown');
+                                }
+                            });
+                        }
                     }
-                });
-            }
-        }
-        // Open the first tab by default
+                }
+            })();
+            {% endfor %}
+        {% endfor %}
+        
+        updateView();
         openTab({currentTarget:document.querySelector(".tab-link.active")},"degs");
     }); 
     </script>
     </body></html>
     """
     
-    # Render the template
-    html_content = Template(template_str).render(
+    html_content = Template(t).render(
         sample_name=sample_name, 
-        plots=plots_html, 
-        sig_table=sig_table_html, 
-        deg_tables=deg_table_html, 
-        params=params, 
-        has_genes_col=has_genes_col
+        deg_tables=deg_table_html,
+        report_data=report_data,
+        selected_tissue_name=selected_tissue_name
     )
     
-    # Write to file
     with open(output_path, "w", encoding='utf-8') as f: 
         f.write(html_content)
+
+if __name__ == "__main__":
+    pass

@@ -33,6 +33,9 @@ class DatabaseFileParser:
                 df = pd.read_csv(db_file)
             elif content_type == 'tsv':
                 df = pd.read_csv(db_file, sep='\t')
+            elif content_type == 'xlsx_multi_sheet':
+                # Returns a Dict of DataFrames {sheet_name: dataframe}
+                df = pd.read_excel(db_file, sheet_name=None)
             elif content_type == 'json':
                 try:
                     df = pd.read_json(db_file)
@@ -40,7 +43,12 @@ class DatabaseFileParser:
                     df = pd.read_json(db_file, lines=True)
             
             if df is not None:
-                print(f"✅ Successfully parsed. Shape: {df.shape}")
+                # FIX: Handle printing logic based on whether df is a Dict or DataFrame
+                if isinstance(df, dict):
+                    print(f"✅ Successfully parsed multi-sheet file. Sheets found: {len(df.keys())}")
+                else:
+                    print(f"✅ Successfully parsed. Shape: {df.shape}")
+                
                 # Store the result in the instance attribute
                 self.dataframe = df 
             else:
@@ -49,4 +57,3 @@ class DatabaseFileParser:
         except Exception as e:
             print(f"❌ An error occurred while parsing: {e}")
             # self.dataframe remains None on failure
-

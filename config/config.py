@@ -17,6 +17,8 @@ PROCESSED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed_db_dfs')
 RECOVER_ID_DATA_DIR = os.path.join(BASE_DATA_DIR, 'recovered_ids_dfs')
 PROCESSED_COMBINED_DATA_DIR = os.path.join(BASE_DATA_DIR, 'processed_combined_db')
 SQLITE_DB_PATH = os.path.join(BASE_DATA_DIR, 'sapiens_ontocellmap.sqlite')
+PROCESSED_COMBINED_DATABASE_FILE = os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv")
+PROCESSED_COMBINED_DATABASE_FILE_HTML = os.path.join(PROCESSED_COMBINED_DATA_DIR, "sapiens_visualizer.html")
 
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
@@ -130,9 +132,26 @@ DATABASE_CONFIG = {
             "source_type": "Computational",
             "source_info_cols": ["p_val_adj", "avg_log2FC", "pct.1" ,"pct.2"]
         }
+    },
+    "skin_atlas_MERFISH" :{
+        "source" : ["",os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/Table_S3_MERFISHClusterMarkers.xlsx"), "xlsx_multi_sheet"], 
+        "parser_key": "skin_atlas",
+        "parser_config": {
+            "database_name" : "Skin_Atlas_MERFISH", 
+            "tissue_name": "Skin"
+        }
+    },
+    "skin_atlas_scRNAseq" :{
+        "source" : ["",os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/Table_S4_scRNAseqClusterMarkers.xlsx"), "xlsx_multi_sheet"], 
+        "parser_key": "skin_atlas",
+        "parser_config": {
+            "database_name" : "Skin_Atlas_scRNAseq",
+            "tissue_name": "Skin"
+        }
     }
 }
 # HuBMAP: https://humanatlas.io/asctb-tables manually download the latest version and further once parsed the summary file to get the organ csv url and download 
 # ScarCellMarker: http://124.220.48.30:3838/ScarCellMarker/#tab-8377-7 manually downloaded by clicking on the ratio buttons of each study
 # WIMMS: session id changes each time making the download difficult hence downloaded using url https://wimms.tanlab.org/ -> signature and datasets download all link
 # Skin SCC: https://www.cell.com/cell/fulltext/S0092-8674(20)30672-3?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS0092867420306723%3Fshowall%3Dtrue supplementary table 2 manually downloaded
+# skin atlas: https://pmc.ncbi.nlm.nih.gov/articles/PMC12485841/#SM1

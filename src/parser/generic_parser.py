@@ -44,9 +44,9 @@ class GenericFileParser:
             gene_col (str): The name of the column containing gene symbols.
             tissue_name (Optional[str]): A fixed tissue name to apply to all rows.
             tissue_name_col (Optional[str]): The column name containing tissue names.
-            base_cell_name (Optional[str]): A fixed base cell name for constructing cell names.
-            cell_name_col (Optional[str]): The column name containing full cell names.
-            cell_subtype_col (Optional[str]): Column with subtypes to append to 'base_cell_name'.
+            base_cell_name (Optional[str]): A fixed base cell name for *querying*.
+            cell_name_col (Optional[str]): The column name containing full cell names (for querying).
+            cell_subtype_col (Optional[str]): Column with subtypes to append to 'base_cell_name' *after* querying.
             source_type (str): The source type (e.g., "Computational").
             source_info_cols (Optional[list]): Columns to concatenate for the 'source_info' field.
             info_separator (str): Separator for joining 'source_info_cols'.
@@ -78,14 +78,26 @@ class GenericFileParser:
         else:
             df_proc['db_tissue_name'] = df_proc[tissue_name_col]
 
-        # Construct cell name (either from a column or by combining base + subtype)
+        # --- (NEW LOGIC) Handle Cell Name Querying vs. Final Name ---
+        
+        # This variable will hold the *final* specific names, if they are different from the query names.
+        final_cell_names: Optional[pd.Series] = None 
+
         if cell_name_col:
+            # Mode 1: A column provides the full cell name.
+            # We use this for *both* querying and as the final name.
             df_proc['db_cell_name'] = df_proc[cell_name_col]
         else:
+            # Mode 2: We use 'base_cell_name'.
+            # The 'db_cell_name' column is *temporarily* set to the base name for querying.
+            df_proc['db_cell_name'] = base_cell_name
+            
             if cell_subtype_col and cell_subtype_col in df_proc.columns:
-                df_proc['db_cell_name'] = base_cell_name + "_" + df_proc[cell_subtype_col].astype(str)
-            else:
-                df_proc['db_cell_name'] = base_cell_name
+                # If a subtype exists, we *store* the final composite name
+                # to be used *after* normalization.
+                final_cell_names = base_cell_name + "_" + df_proc[cell_subtype_col].astype(str)
+            # If no subtype, the query name (base_cell_name) is also the final name,
+            # so 'final_cell_names' remains None.
         
         # --- Step 2: Handle Metadata ---
         df_proc['database'] = database_name
@@ -101,58 +113,18 @@ class GenericFileParser:
             df_proc['source_info'] = None
 
         # --- Step 3: Use the BaseParser for normalization ---
+        # The normalizer will query using the 'db_cell_name' column,
+        # which now contains the *general* name (e.g., "T-Cell").
         normalizer = BaseParser()
-        self.processed_df, self.recovery_df = normalizer.normalize_dataframe(df_proc)
+        processed_df, self.recovery_df = normalizer.normalize_dataframe(df_proc)
 
-# --- USAGE EXAMPLE ---
-#
-# To use this parser, you would typically do the following in your orchestrator script
-# (e.g., database_creator.py), driven by your config file.
-#
-# import pandas as pd
-# from src.parser.generic_parser import GenericFileParser
-#
-# # --- SCENARIO 1: Hard-coded tissue, constructed cell name (like Epi_Cluster) ---
-# data1 = {'GeneSymbol': ['CD4', 'CD8A'], 'ClusterID': ['T_helper', 'T_cyto'], 'Score': [0.9, 0.95]}
-# df1 = pd.DataFrame(data1)
-#
-# parser1 = GenericFileParser(
-#     df=df1,
-#     database_name="MyFirstDataset",
-#     gene_col="GeneSymbol",
-#     tissue_name="Blood",  # Fixed tissue name
-#     base_cell_name="T-Cell",  # Base for cell name
-#     cell_subtype_col="ClusterID",  # Subtype to append
-#     source_info_cols=["Score"]
-# )
-# # This would produce db_cell_names like "T-Cell_T_helper"
-# # processed_df1 = parser1.processed_df
-#
-# # --- SCENARIO 2: Tissue name from a column, cell name is fixed ---
-# data2 = {'markers': ['KRT5', 'KRT14'], 'organ': ['Skin', 'Esophagus'], 'pval': [0.01, 0.005]}
-# df2 = pd.DataFrame(data2)
-#
-# parser2 = GenericFileParser(
-#     df=df2,
-#     database_name="MySecondDataset",
-#     gene_col="markers",
-#     tissue_name_col="organ",  # Get tissue from the 'organ' column
-#     base_cell_name="Basal Epithelial Cell",  # Cell name is the same for all rows
-#     source_info_cols=["pval"]
-# )
-# # This would produce db_tissue_names "Skin", "Esophagus" and a db_cell_name "Basal Epithelial Cell"
-# # processed_df2 = parser2.processed_df
-#
-# # --- SCENARIO 3: Both tissue and cell names are read directly from columns ---
-# data3 = {'gene_id': ['EPCAM', 'COL1A1'], 'tissue_type': ['Lung', 'Skin'], 'cell_type_original': ['Epithelial cell', 'Fibroblast']}
-# df3 = pd.DataFrame(data3)
-#
-# parser3 = GenericFileParser(
-#     df=df3,
-#     database_name="MyThirdDataset",
-#     gene_col="gene_id",
-#     tissue_name_col="tissue_type",  # Get tissue from a column
-#     cell_name_col="cell_type_original"  # Get the full cell name from a column
-# )
-# # This is the most flexible option for simple tables.
-# # processed_df3 = parser3.processed_df
+        # --- Step 4: (NEW LOGIC) Overwrite with Final Cell Name ---
+        # If we stored final composite names, we apply them now to the
+        # *processed* dataframe, replacing the general query name.
+        if final_cell_names is not None:
+            # Use .loc to align the names based on the index,
+            # which is crucial if normalization dropped any rows.
+            processed_df['db_cell_name'] = final_cell_names.loc[processed_df.index]
+
+        # Store the final processed dataframe
+        self.processed_df = processed_df
