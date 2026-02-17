@@ -55,7 +55,14 @@ class CellMarkerDBParser:
         
         # Keep cancer_type in a dictionary handle the suffix
         cancer_type_series = df['cancer_type'].copy()
-        df.loc[df['db_tissue_id'].str.startswith('CL:', na=False), 'db_tissue_id'] = None
+
+        # Positive filter: only keep UBERON IDs in db_tissue_id (nullify CL, LMHA, etc.)
+        valid_uberon = df['db_tissue_id'].str.startswith(('UBERON:', 'UBERON_'), na=False)
+        df.loc[df['db_tissue_id'].notna() & ~valid_uberon, 'db_tissue_id'] = None
+
+        # Positive filter: only keep CL IDs in db_cell_id (nullify LMHA, etc.)
+        valid_cl = df['db_cell_id'].str.startswith(('CL:', 'CL_'), na=False)
+        df.loc[df['db_cell_id'].notna() & ~valid_cl, 'db_cell_id'] = None
 
 
         # --- Step 3: Use the BaseParser for normalization ---

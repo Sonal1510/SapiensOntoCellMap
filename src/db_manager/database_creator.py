@@ -15,8 +15,9 @@ try:
     
     # --- IMPORTS MOVED HERE ---
     from src.parser.database_file_parser import DatabaseFileParser
+    from src.db_manager.database_validator import DatabaseValidator
     from config.config import (
-        RAW_DATA_DIR, 
+        RAW_DATA_DIR,
         PROCESSED_DATA_DIR,
         RECOVER_ID_DATA_DIR,
         PROCESSED_COMBINED_DATA_DIR,
@@ -107,6 +108,27 @@ class DatabaseCreate:
         else:
             print("No data was processed. Combined DataFrame is empty.")
 
+        # --- Step 3.5: Deduplicate ---
+        if not self.combined_df.empty:
+            before = len(self.combined_df)
+            self.combined_df.drop_duplicates(
+                subset=['tissue_id', 'cell_id', 'gene', 'database'],
+                keep='first', inplace=True
+            )
+            self.combined_df.reset_index(drop=True, inplace=True)
+            print(f"Dedup: {before} -> {len(self.combined_df)} ({before - len(self.combined_df)} removed)")
+
+        # --- Step 3.6: Validate ---
+        if not self.combined_df.empty:
+            validator = DatabaseValidator()
+            self.combined_df, quarantine_df, report = validator.validate(self.combined_df)
+            validator._print_report(report)
+
+            # Save quarantine log
+            if not quarantine_df.empty:
+                q_path = os.path.join(PROCESSED_COMBINED_DATA_DIR, "quarantine_log.csv")
+                quarantine_df.to_csv(q_path, index=False)
+                print(f"Quarantined {len(quarantine_df)} rows -> {q_path}")
 
         print("\n--- Step 4: Saving All Output Files ---")
         for name, df in self.processed_dfs.items():

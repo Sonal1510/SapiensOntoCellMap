@@ -7,6 +7,7 @@ Description     : A base parser to handle common ontology normalization and sche
                   Includes logic for pre-search remapping and post-search keyword imputation.
 """
 import pandas as pd
+import re
 from typing import Tuple, Dict
 import sys
 import os
@@ -187,13 +188,40 @@ class BaseParser:
         df_proc['tissue_name'] = corrected_tissue_ids.map(self.p.uberon_id_to_name)
         df_proc['cell_name'] = corrected_cell_ids.map(self.p.cl_id_to_name)
 
+        # --- Step 6.1: Resolve obsolete cell names ---
+        obsolete_mask = df_proc['cell_name'].str.contains(r'(?i)^obsolete\b', na=False)
+        if obsolete_mask.any():
+            for idx in df_proc.loc[obsolete_mask].index:
+                cell_id = str(df_proc.loc[idx, 'cell_id']).replace('_', ':')
+                try:
+                    replaced = self.p.ontology_parser.get_term_replacement(cell_id)
+                    if replaced:
+                        new_name = self.p.cl_id_to_name.get(replaced)
+                        if new_name and not new_name.lower().startswith('obsolete'):
+                            df_proc.loc[idx, 'cell_id'] = replaced.replace(':', '_')
+                            df_proc.loc[idx, 'cell_name'] = new_name
+                            continue
+                except (AttributeError, Exception):
+                    pass
+                # Fallback: strip "obsolete" prefix
+                df_proc.loc[idx, 'cell_name'] = re.sub(
+                    r'(?i)^obsolete\s+', '', str(df_proc.loc[idx, 'cell_name'])
+                )
+
         # --- Step 6.5 - Handle non-specific tissue names ---
         # This ensures 'tissue_name' (final) is the 'db_tissue_name' if it's non-specific
         nonspecific_mask = df_proc['nlp_tissue_flag'] == 'non_specific'
-        
+
         if nonspecific_mask.any():
             df_proc.loc[nonspecific_mask, 'tissue_name'] = df_proc.loc[nonspecific_mask, 'db_tissue_name']
-            
+
+        # --- Step 6.6: Fallback NaN tissue_name to db_tissue_name ---
+        still_missing = df_proc['tissue_name'].isna() & df_proc['db_tissue_name'].notna()
+        if still_missing.any():
+            df_proc.loc[still_missing, 'tissue_name'] = df_proc.loc[still_missing, 'db_tissue_name']
+            nan_flag = still_missing & df_proc['nlp_tissue_flag'].isna()
+            df_proc.loc[nan_flag, 'nlp_tissue_flag'] = 'unresolved_fallback'
+
         # --- Step 7: Finalize Schema ---
         final_cols = [
             'db_tissue_name', 'db_tissue_id', 'db_cell_name', 'db_cell_id',
