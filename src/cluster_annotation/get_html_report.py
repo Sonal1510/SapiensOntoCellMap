@@ -665,55 +665,160 @@ def _build_hierarchy_html(hierarchical_results):
     return '\n'.join(html_parts)
 
 
-def _build_umap_scatter(umap_data, sample_name):
+def _create_publication_umap(umap_data, sample_name, output_dir):
     """
-    Build interactive UMAP scatter plot colored by recommended cell type.
-    Uses scattergl (WebGL) for performance with large point counts.
+    Create publication-quality UMAP PNGs matching the BD17 sample summary style.
+    Two side-by-side panels:
+      Left:  colored by cluster number with centroid labels
+      Right: colored by cell type annotation with centroid labels
+    Saves standalone PNGs and returns base64-embedded HTML for the report.
     """
     if umap_data is None or umap_data.empty:
         return ""
 
+    logger = logging.getLogger(__name__)
+
     try:
-        fig = go.Figure()
+        import matplotlib.patheffects as pe
+        from matplotlib.patches import Patch
 
-        # Use discrete colors for each cell type
+        x = umap_data['UMAP-1'].values
+        y = umap_data['UMAP-2'].values
+
+        # --- Color palettes ---
+        clusters = sorted(umap_data['Cluster'].unique(), key=natural_sort_key)
         cell_types = sorted(umap_data['Top_Cell_Type'].unique(), key=natural_sort_key)
-        colors = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Dark2
-        color_map = {ct: colors[i % len(colors)] for i, ct in enumerate(cell_types)}
 
+        cluster_palette = sns.color_palette('tab20', n_colors=max(len(clusters), 1))
+        cluster_cmap = {c: cluster_palette[i % len(cluster_palette)] for i, c in enumerate(clusters)}
+
+        celltype_palette = sns.color_palette('Set2', n_colors=max(len(cell_types), 1))
+        ct_cmap = {ct: celltype_palette[i % len(celltype_palette)] for i, ct in enumerate(cell_types)}
+        if 'Unannotated' in ct_cmap:
+            ct_cmap['Unannotated'] = (0.8, 0.8, 0.8)
+
+        # --- Compute centroids for labels ---
+        cluster_centroids = umap_data.groupby('Cluster')[['UMAP-1', 'UMAP-2']].median()
+        ct_centroids = umap_data.groupby('Top_Cell_Type')[['UMAP-1', 'UMAP-2']].median()
+
+        # Text outline for readability
+        text_outline = [pe.withStroke(linewidth=2.5, foreground='white')]
+
+        # --- Create figure: two panels side by side ---
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+        # Panel 1: By Cluster
+        for cl in clusters:
+            mask = umap_data['Cluster'] == cl
+            ax1.scatter(x[mask], y[mask], c=[cluster_cmap[cl]], s=1.5,
+                        alpha=0.6, edgecolors='none', rasterized=True)
+        for cl in clusters:
+            if cl in cluster_centroids.index:
+                cx, cy = cluster_centroids.loc[cl]
+                # Extract cluster number for clean label
+                label = cl.replace('Cluster ', '') if cl.startswith('Cluster ') else cl
+                ax1.text(cx, cy, label, fontsize=9, fontweight='bold',
+                         ha='center', va='center', path_effects=text_outline)
+
+        ax1.set_xlabel('UMAP1', fontsize=11)
+        ax1.set_ylabel('UMAP2', fontsize=11, labelpad=0)
+        ax1.set_title('GE Cluster', fontsize=12, fontweight='bold')
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+        for spine in ax1.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.5)
+            spine.set_color('#333333')
+
+        # Panel 2: By Cell Type
         for ct in cell_types:
-            subset = umap_data[umap_data['Top_Cell_Type'] == ct]
-            fig.add_trace(go.Scattergl(
-                x=subset['UMAP-1'], y=subset['UMAP-2'],
-                mode='markers',
-                name=ct,
-                marker=dict(size=3, opacity=0.7,
-                            color='#cccccc' if ct == 'Unannotated' else color_map[ct]),
-                customdata=subset[['Barcode', 'Cluster', 'Top_Cell_Type']].values,
-                hovertemplate=(
-                    '<b>%{customdata[2]}</b><br>'
-                    'Cluster: %{customdata[1]}<br>'
-                    'Barcode: %{customdata[0]}<br>'
-                    'UMAP-1: %{x:.2f}<br>'
-                    'UMAP-2: %{y:.2f}'
-                    '<extra></extra>'
-                ),
-            ))
+            mask = umap_data['Top_Cell_Type'] == ct
+            ax2.scatter(x[mask], y[mask], c=[ct_cmap[ct]], s=1.5,
+                        alpha=0.6, edgecolors='none', rasterized=True, label=ct)
+        for ct in cell_types:
+            if ct in ct_centroids.index and ct != 'Unannotated':
+                cx, cy = ct_centroids.loc[ct]
+                # Truncate long names
+                label = ct if len(ct) <= 20 else ct[:18] + '...'
+                ax2.text(cx, cy, label, fontsize=8, fontweight='bold',
+                         ha='center', va='center', path_effects=text_outline)
 
-        fig.update_layout(
-            title=dict(text=f'UMAP — {sample_name}', x=0.5, font=dict(size=16)),
-            xaxis_title='UMAP-1', yaxis_title='UMAP-2',
-            height=600,
-            template='simple_white',
-            legend=dict(title='Cell Type', font=dict(size=11),
-                        itemsizing='constant'),
-            margin=dict(t=60, l=60, r=20, b=60),
+        ax2.set_xlabel('UMAP1', fontsize=11)
+        ax2.set_ylabel('UMAP2', fontsize=11, labelpad=0)
+        ax2.set_title('Cell Type Annotation', fontsize=12, fontweight='bold')
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+        for spine in ax2.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.5)
+            spine.set_color('#333333')
+
+        fig.suptitle(sample_name, fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+
+        # --- Save standalone PNGs ---
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Combined figure
+        combined_path = os.path.join(output_dir, f"{sample_name}_umap_celltype.png")
+        fig.savefig(combined_path, dpi=300, bbox_inches='tight',
+                    facecolor='white', edgecolor='none')
+        logger.info(f"UMAP PNG saved: {combined_path}")
+
+        # Also save cell-type-only panel for PDF insertion
+        fig_ct, ax_ct = plt.subplots(1, 1, figsize=(7, 6))
+        for ct in cell_types:
+            mask = umap_data['Top_Cell_Type'] == ct
+            ax_ct.scatter(x[mask], y[mask], c=[ct_cmap[ct]], s=1.5,
+                          alpha=0.6, edgecolors='none', rasterized=True, label=ct)
+        for ct in cell_types:
+            if ct in ct_centroids.index and ct != 'Unannotated':
+                cx, cy = ct_centroids.loc[ct]
+                label = ct if len(ct) <= 20 else ct[:18] + '...'
+                ax_ct.text(cx, cy, label, fontsize=9, fontweight='bold',
+                           ha='center', va='center', path_effects=text_outline)
+        ax_ct.set_xlabel('UMAP1', fontsize=12)
+        ax_ct.set_ylabel('UMAP2', fontsize=12, labelpad=0)
+        ax_ct.set_xticks([])
+        ax_ct.set_yticks([])
+        for spine in ax_ct.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.5)
+            spine.set_color('#333333')
+        plt.tight_layout()
+
+        ct_only_path = os.path.join(output_dir, f"{sample_name}_umap_celltype_only.png")
+        fig_ct.savefig(ct_only_path, dpi=300, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+        plt.close(fig_ct)
+        logger.info(f"Cell-type-only UMAP PNG saved: {ct_only_path}")
+
+        # --- Embed combined figure in HTML ---
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                    facecolor='white', edgecolor='none')
+        plt.close(fig)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode('utf-8')
+
+        return (
+            f'<div style="position:relative;">'
+            f'<img src="data:image/png;base64,{b64}" loading="lazy" '
+            f'style="width:100%; height:auto;">'
+            f'<br><a download="{sample_name}_umap_celltype.png" '
+            f'href="data:image/png;base64,{b64}" '
+            f'style="display:inline-block;margin:8px 0;padding:6px 16px;background:#007bff;'
+            f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">'
+            f'Download UMAP</a>'
+            f'<span style="margin-left:10px;font-size:12px;color:#555;">'
+            f'300 DPI PNGs also saved to output directory</span></div>'
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs=False)
-
     except Exception as e:
-        logging.getLogger(__name__).warning(f"UMAP scatter plot failed: {e}")
+        logger.warning(f"Publication UMAP failed: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
         return ""
 
 
@@ -941,9 +1046,9 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
     # UMAP scatter
     if umap_html:
         parts.append('<h3 style="margin-top:30px;">UMAP Visualization</h3>')
-        parts.append('<p style="font-size:13px;color:#555;">Interactive scatter plot — '
-                     'hover over points for barcode and cluster details. '
-                     'Use Plotly toolbar to download as PNG/SVG.</p>')
+        parts.append('<p style="font-size:13px;color:#555;">Left: clusters colored by '
+                     'GE cluster ID. Right: clusters colored by recommended cell type '
+                     'annotation. 300 DPI PNGs saved to output directory for publication use.</p>')
         parts.append(umap_html)
 
     # Marker heatmap
@@ -975,9 +1080,11 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
     hierarchy_html = _build_hierarchy_html(hierarchical_results or {})
 
     # Build summary tab content
+    import os
+    output_dir = os.path.dirname(output_path)
     summary_html = ""
     if top_annotation_df is not None and not top_annotation_df.empty:
-        umap_html = _build_umap_scatter(umap_data, sample_name) if umap_data is not None else ""
+        umap_html = _create_publication_umap(umap_data, sample_name, output_dir) if umap_data is not None else ""
         heatmap_html = _build_marker_heatmap(top_annotation_df, deg_df) if deg_df is not None else ""
         summary_html = _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html)
 
