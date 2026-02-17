@@ -195,6 +195,7 @@ def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
     df_long.dropna(subset=['Cluster', 'Type'], inplace=True)
     
     df = df_long.pivot_table(index=id_vars+['Cluster'], columns='Type', values='value', aggfunc='first').reset_index()
+    df.columns.name = None  # Remove "Type" column axis name from pivot
     df.rename(columns={'Adjusted p value':'adj_p_value', 'Log2 fold change':'log2FC', 'Mean Counts':'mean_counts'}, inplace=True)
     df.fillna({'mean_counts':0, 'adj_p_value':1, 'log2FC':0}, inplace=True)
     return df
@@ -358,7 +359,7 @@ def plot_deg_counts_barchart(markers):
                  title='Number of Genes per Cluster for Hypergeometric Test',
                  labels={'x':'Cluster', 'y':'Number of Genes'}, color=s.index, text=s.values)
     fig.update_layout(showlegend=False)
-    fig.update_traces(marker_color='steelblue')
+    fig.update_traces(marker_color='steelblue', textposition='outside')
     return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False, include_plotlyjs=False)}<hr style="margin: 25px 0;">'
 
 def create_deg_tables_html(deg_df, cluster_markers, p_val_thresh, log2fc_thresh, mean_counts_thresh):
@@ -369,10 +370,11 @@ def create_deg_tables_html(deg_df, cluster_markers, p_val_thresh, log2fc_thresh,
     bar = plot_deg_counts_barchart(cluster_markers)
     
     # Generate Dropdown and Tables
-    dropdown = ['<label for="cluster_select"><b>Select a Cluster to view its DEGs:</b></label>', 
-                '<select id="cluster_select" onchange="showTable(this.value)">']
+    dropdown = ['<label for="cluster_select"><b>Select a Cluster to view its DEGs:</b></label>',
+                '<select id="cluster_select" onchange="showTable(this.value)">',
+                '<option value="">--Select--</option>']
     tables = []
-    
+
     for cl in sorted(cluster_markers.keys(), key=natural_sort_key):
         safe_cl = re.sub(r'\s+','_',str(cl))
         dropdown.append(f'<option value="deg_table_{safe_cl}">{cl} ({len(cluster_markers[cl])} genes)</option>')
