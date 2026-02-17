@@ -149,6 +149,8 @@ def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type):
         log2fc_thresh=args.log2fc,
         mean_counts_thresh=args.mean,
         top_genes=args.topgenes,
+        min_overlap=args.min_overlap,
+        background_gene_count=args.background_gene_count,
     )
     pipeline.fit()
 
@@ -292,6 +294,8 @@ def main():
     parser.add_argument("--topgenes", type=int, default=None, help="Top N genes")
     parser.add_argument("--marker_db", required=True, help="Path to marker DB CSV")
     parser.add_argument("--tissue", type=str, default=None, help="Filter marker DB for tissue")
+    parser.add_argument("--min_overlap", type=int, default=2, help="Minimum gene overlap count to report (default: 2)")
+    parser.add_argument("--background_gene_count", type=int, default=None, help="Override background gene count N for hypergeometric test")
     
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)

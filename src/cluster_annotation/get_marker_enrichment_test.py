@@ -22,11 +22,13 @@ class MarkerEnrichmentTest:
         self,
         deg_file,
         marker_db_dict,
-        deg_file_type='spatial', 
+        deg_file_type='spatial',
         p_val_thresh=0.05,
         log2fc_thresh=1.0,
         mean_counts_thresh=0,
         top_genes=None,
+        min_overlap=2,
+        background_gene_count=None,
     ):
         if not deg_file or not os.path.exists(deg_file):
             raise FileNotFoundError(f"DEG file not found: {deg_file}")
@@ -51,25 +53,39 @@ class MarkerEnrichmentTest:
             self.is_weighted_mode = False
             logging.info("Input is list: Activating CONVENTIONAL Enrichment Statistics.")
 
+        self._gene_display_name = {}  # UPPER -> original case
+
         for k, v in marker_db_dict.items():
             k_str = str(k).strip()
             if self.is_weighted_mode:
-                # {gene: weight}
-                clean_v = {str(g).strip(): float(w) for g, w in v.items() if pd.notna(g)}
+                clean_v = {}
+                for g, w in v.items():
+                    if pd.notna(g):
+                        original = str(g).strip()
+                        normalized = original.upper()
+                        clean_v[normalized] = float(w)
+                        self._gene_display_name[normalized] = original
             else:
-                # List of genes -> Convert to {gene: 1.0} for unified math
-                clean_v = {str(g).strip(): 1.0 for g in v if pd.notna(g)}
-                
+                clean_v = {}
+                for g in v:
+                    if pd.notna(g):
+                        original = str(g).strip()
+                        normalized = original.upper()
+                        clean_v[normalized] = 1.0
+                        self._gene_display_name[normalized] = original
+
             self.marker_dict_internal[k_str] = clean_v
             all_db_genes.update(clean_v.keys())
 
         self.p_val_thresh = p_val_thresh
         self.log2fc_thresh = log2fc_thresh
-        self.mean_counts_thresh = mean_counts_thresh 
+        self.mean_counts_thresh = mean_counts_thresh
         self.top_genes = top_genes
-        
+        self.min_overlap = min_overlap
+        self.N_override = background_gene_count
+
         self.deg_df_long = self._normalize_deg_df()
-        
+
         if self.deg_file_type == 'spatial' and self.mean_counts_thresh == 0.0:
             if 'Mean Counts' in self.deg_df_long.columns:
                 pos = self.deg_df_long[self.deg_df_long['Mean Counts'] > 0]['Mean Counts']
@@ -77,6 +93,23 @@ class MarkerEnrichmentTest:
                     self.mean_counts_thresh = pos.quantile(0.75)
 
         self.background_genes = set(self.deg_df_long["Feature Name"].unique())
+
+        # Heuristic warning for scRNA-seq with likely underestimated N
+        if self.N_override is None and self.deg_file_type == 'scrna':
+            n_genes = len(self.background_genes)
+            if n_genes < 15000 and 'Adjusted p value' in self.deg_df_long.columns:
+                pvals = self.deg_df_long['Adjusted p value'].dropna()
+                if len(pvals) > 0 and (pvals < 0.05).mean() > 0.80:
+                    logging.warning(
+                        f"Detected N={n_genes} genes. For whole-transcriptome scRNA-seq, "
+                        f"N should be ~20,000. Over 80% of adjusted p-values are < 0.05, "
+                        f"suggesting the DEG file contains only significant genes. "
+                        f"Use --background_gene_count to override."
+                    )
+
+        if self.N_override is not None:
+            logging.info(f"Using user-specified background gene count N={self.N_override}")
+
         self.cluster_markers = {}
         self.results_ = pd.DataFrame()
 
@@ -88,6 +121,7 @@ class MarkerEnrichmentTest:
             df.rename(columns=rename, inplace=True)
             if 'Mean Counts' not in df.columns: df['Mean Counts'] = 0
             df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
+            df['Feature Name'] = df['Feature Name'].astype(str).str.strip().str.upper()
             return df[['Feature Name', 'Cluster', 'Adjusted p value', 'Log2 fold change', 'Mean Counts']]
         elif self.deg_file_type == 'spatial':
             df = self.raw_deg_df.copy()
@@ -98,6 +132,7 @@ class MarkerEnrichmentTest:
             df = df_long.pivot_table(index=id_vars+['Cluster'], columns='Metric Type', values='Value', aggfunc='first').reset_index()
             df.rename(columns={'Adjusted p value': 'Adjusted p value', 'Log2 fold change': 'Log2 fold change', 'Mean Counts': 'Mean Counts'}, inplace=True)
             df.fillna({'Adjusted p value': 1.0, 'Log2 fold change': 0.0, 'Mean Counts': 0.0}, inplace=True)
+            df['Feature Name'] = df['Feature Name'].astype(str).str.strip().str.upper()
             return df
         else:
             raise ValueError(f"Unknown type: {self.deg_file_type}")
@@ -120,9 +155,9 @@ class MarkerEnrichmentTest:
         return d
 
     def _run_test(self):
-        N = len(self.background_genes)
+        N = self.N_override if self.N_override else len(self.background_genes)
         all_results_list = []
-        
+
         for cluster_id, cluster_genes in self.cluster_markers.items():
             n = len(cluster_genes)
             if n == 0: continue
@@ -135,43 +170,45 @@ class MarkerEnrichmentTest:
 
                 overlap_genes = set(cluster_genes).intersection(cell_genes_set)
                 k = len(overlap_genes)
-                if k == 0: continue
+                if k < self.min_overlap: continue
 
                 # 1. P-value (Always Hypergeometric on counts)
                 p_val = hypergeom.sf(k - 1, N, K, n)
-                
+
                 # 2. Base Metrics
                 enrichment_ratio = (k / n) / (K / N) if K > 0 else 0
-                
+
+                # Display original-case gene names in output
+                display_genes = [self._gene_display_name.get(g, g) for g in sorted(overlap_genes)]
+
                 row = {
                     "Cluster": cluster_id,
                     "Cell_type": cell_type,
                     "p_value": p_val,
                     "Enrichment_ratio": enrichment_ratio,
                     "Overlapping_genes_count": k,
-                    "Overlapping_genes": ", ".join(sorted(overlap_genes)),
+                    "Overlapping_genes": ", ".join(display_genes),
                 }
 
                 # 3. Weighted Metrics (Only calculate/add if in Weighted Mode)
                 if self.is_weighted_mode:
                     overlap_w_sum = sum(weighted_genes[g] for g in overlap_genes)
                     ref_w_sum = sum(weighted_genes[g] for g in cell_genes_set)
-                    
+
                     # Weighted Recall
                     row["Weighted_Recall"] = overlap_w_sum / ref_w_sum if ref_w_sum > 0 else 0
-                    
+
                     # Weighted Enrichment
-                    # (Sum of Weights in Overlap / n) / (Sum of Weights in Background / N)
-                    # NOTE: Background weight sum is needed for true ratio. 
-                    # Approximation: (OverlapW / n) * (N / RefW)
                     row["Weighted_Enrichment"] = (overlap_w_sum / n) * (N / ref_w_sum) if ref_w_sum > 0 else 0
 
                 results.append(row)
 
             if results:
-                df = pd.DataFrame(results)
-                df["adj_p_value"] = multi.multipletests(df["p_value"], method="fdr_bh")[1]
-                all_results_list.append(df)
+                all_results_list.append(pd.DataFrame(results))
 
         if not all_results_list: return pd.DataFrame()
-        return pd.concat(all_results_list, ignore_index=True).sort_values(["Cluster", "adj_p_value"])
+
+        # Global FDR correction across ALL clusters
+        combined = pd.concat(all_results_list, ignore_index=True)
+        combined["adj_p_value"] = multi.multipletests(combined["p_value"], method="fdr_bh")[1]
+        return combined.sort_values(["Cluster", "adj_p_value"])
