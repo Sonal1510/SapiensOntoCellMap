@@ -1,5 +1,9 @@
-data
+data/*
+!data/pre_manually_downloaded_files/
 SapiensOntoCellMap_env
 CLAUDE.md
 features_update.md
 .claude/
+__pycache__/
+*.pyc
+.DS_Store

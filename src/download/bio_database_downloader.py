@@ -14,7 +14,7 @@ try:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     if project_root not in sys.path:
         sys.path.append(project_root)
-    from config.config import RAW_DATA_DIR, DATABASE_CONFIG
+    from config.config import RAW_DATA_DIR, DATABASE_CONFIG, REFERENCE_DATA_DIR, HGNC_COMPLETE_SET_URL, HGNC_COMPLETE_SET_FILE
 except ImportError as e:
     print(f"❌ A critical import error occurred: {e}")
     print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
@@ -140,3 +140,26 @@ class BioDataDownloader:
         #      print(f" - {os.path.basename(path)}") # Just show filename
 
         return available_files
+
+    def download_reference_data(self):
+        """
+        Downloads reference data files (e.g., HGNC gene alias map) needed by
+        the enrichment pipeline. These are separate from the marker databases
+        and stored in data/reference/.
+
+        Returns:
+            dict: {name: file_path} for all available reference files.
+        """
+        os.makedirs(REFERENCE_DATA_DIR, exist_ok=True)
+        available = {}
+
+        # --- HGNC Complete Set (gene alias resolution) ---
+        print("\n--- Processing HGNC Complete Set (gene alias map) ---")
+        result = self._download_file(HGNC_COMPLETE_SET_URL, HGNC_COMPLETE_SET_FILE)
+        if result:
+            available['hgnc_complete_set'] = result
+        else:
+            print("❌ HGNC download failed. Gene alias resolution will be unavailable.")
+
+        print(f"\nTotal reference files available: {len(available)}")
+        return available

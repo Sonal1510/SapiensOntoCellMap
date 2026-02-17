@@ -23,6 +23,8 @@ import matplotlib.gridspec as gridspec
 from scipy.cluster.hierarchy import linkage, dendrogram
 from jinja2 import Template
 import plotly.express as px
+import plotly.graph_objects as go
+from collections import defaultdict
 from typing import Dict, List, Tuple
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -436,17 +438,548 @@ def _prepare_sig_table(df, tid):
     )
     return html, has_genes
 
-def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_maps, deg_table_html, params_maps, selected_tissue_name=None):
+def _build_icicle_chart(c_df, cluster_name):
+    """Build a Plotly icicle chart for one cluster's hierarchy nodes."""
+    rows = c_df.to_dict('records')
+
+    if len(rows) < 2:
+        if rows:
+            r = rows[0]
+            return (f'<p style="margin:10px 0;"><b>Single annotation:</b> '
+                    f'{r["Cell_Type"]} ({r["CL_ID"]}) &mdash; '
+                    f'Confidence: {r["Confidence"]:.3f}</p>')
+        return ""
+
+    # Parse Supporting_Types into sets for subset checking
+    for r in rows:
+        st = str(r.get('Supporting_Types', ''))
+        r['_support_set'] = set(s.strip() for s in st.split(',') if s.strip())
+
+    # Build parent map: for each node, find closest ancestor whose
+    # support set is a superset of this node's support set
+    parent_map = {}
+    for node in rows:
+        node_id = node['CL_ID']
+        node_depth = node['Depth']
+        node_support = node['_support_set']
+
+        best_parent = None
+        best_depth = -1
+        for candidate in rows:
+            if candidate['CL_ID'] == node_id:
+                continue
+            if candidate['Depth'] >= node_depth:
+                continue
+            if (node_support and candidate['_support_set']
+                    and node_support.issubset(candidate['_support_set'])):
+                if candidate['Depth'] > best_depth:
+                    best_depth = candidate['Depth']
+                    best_parent = candidate['CL_ID']
+
+        parent_map[node_id] = best_parent if best_parent else ""
+
+    # Adjust values for branchvalues="total": parent.value >= sum(children)
+    children_of = defaultdict(list)
+    for nid, pid in parent_map.items():
+        if pid:
+            children_of[pid].append(nid)
+
+    node_scores = {r['CL_ID']: max(r.get('Combined_Score', 0), 0.1) for r in rows}
+
+    def get_adjusted_value(nid, visited=None):
+        if visited is None:
+            visited = set()
+        if nid in visited:
+            return node_scores.get(nid, 0.1)
+        visited.add(nid)
+        children = children_of.get(nid, [])
+        if not children:
+            return node_scores.get(nid, 0.1)
+        child_sum = sum(get_adjusted_value(c, visited) for c in children)
+        return max(node_scores.get(nid, 0), child_sum + 0.1)
+
+    adjusted = {r['CL_ID']: get_adjusted_value(r['CL_ID']) for r in rows}
+
+    # Build trace data
+    ids, labels, parents, values, colors, customdata = [], [], [], [], [], []
+    for r in sorted(rows, key=lambda x: x['Depth']):
+        ids.append(r['CL_ID'])
+        labels.append(r['Cell_Type'])
+        parents.append(parent_map.get(r['CL_ID'], ""))
+        values.append(adjusted[r['CL_ID']])
+        colors.append(r.get('Confidence', 0))
+        customdata.append([
+            r['Cell_Type'], r['CL_ID'],
+            f"{r.get('Confidence', 0):.3f}", r.get('N_Supporting', 0),
+            f"{r.get('Combined_Score', 0):.2f}", r.get('Resolution', '')
+        ])
+
+    fig = go.Figure(go.Icicle(
+        ids=ids, labels=labels, parents=parents, values=values,
+        branchvalues="total",
+        marker=dict(
+            colors=colors,
+            colorscale=[
+                [0, '#f8d7da'], [0.49, '#f8d7da'],
+                [0.5, '#fff3cd'], [0.79, '#fff3cd'],
+                [0.8, '#d4edda'], [1.0, '#28a745']
+            ],
+            cmin=0, cmax=1,
+            colorbar=dict(title="Confidence", tickformat=".1f"),
+            line=dict(width=1, color='white')
+        ),
+        customdata=customdata,
+        hovertemplate=(
+            '<b>%{customdata[0]}</b><br>'
+            'CL ID: %{customdata[1]}<br>'
+            'Confidence: %{customdata[2]}<br>'
+            'N Supporting: %{customdata[3]}<br>'
+            'Combined Score: %{customdata[4]}<br>'
+            'Resolution: %{customdata[5]}'
+            '<extra></extra>'
+        ),
+        textinfo="label",
+        textfont=dict(size=11),
+    ))
+
+    height = max(400, len(rows) * 25)
+    fig.update_layout(
+        title=dict(text=f"Cell Ontology Hierarchy \u2014 {cluster_name}", x=0.5, font=dict(size=14)),
+        height=height,
+        margin=dict(t=50, l=10, r=10, b=10),
+    )
+
+    return fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def _build_hierarchy_html(hierarchical_results):
+    """
+    Build interactive per-cluster hierarchy view with icicle charts and
+    sortable DataTables. Follows the DEG Browser dropdown pattern.
+
+    Args:
+        hierarchical_results: dict of {context_name: DataFrame}
+
+    Returns:
+        HTML string for the hierarchy section
+    """
+    if not hierarchical_results:
+        return ""
+
+    # Pick the best context (prefer selected_tissue over all_tissue)
+    hier_df = None
+    for ctx in ['selected_tissue', 'all_tissue']:
+        if ctx in hierarchical_results:
+            df = hierarchical_results[ctx]
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                hier_df = df
+                break
+
+    if hier_df is None:
+        return ""
+
+    clusters = sorted(hier_df['Cluster'].unique(), key=natural_sort_key)
+    html_parts = []
+
+    # Dropdown
+    html_parts.append(
+        '<label for="hierarchy_cluster_select">'
+        '<b>Select a Cluster to view its hierarchy:</b></label>')
+    html_parts.append(
+        '<select id="hierarchy_cluster_select" onchange="showHierarchy(this.value)">')
+    html_parts.append('<option value="">--Select a Cluster--</option>')
+    for cl in clusters:
+        safe_cl = re.sub(r"[\s'\"]+", '_', str(cl))
+        n_nodes = len(hier_df[hier_df['Cluster'] == cl])
+        html_parts.append(
+            f'<option value="hier_{safe_cl}">{cl} ({n_nodes} nodes)</option>')
+    html_parts.append('</select>')
+
+    # Legend
+    html_parts.append(
+        '<div style="margin:10px 0;font-size:12px;">'
+        '<span style="background:#d4edda;padding:2px 8px;margin-right:8px;">'
+        'High confidence (&ge;0.8)</span>'
+        '<span style="background:#fff3cd;padding:2px 8px;margin-right:8px;">'
+        'Medium confidence (0.5-0.8)</span>'
+        '<span style="background:#f8d7da;padding:2px 8px;">'
+        'Low confidence (&lt;0.5)</span>'
+        '</div>'
+    )
+
+    # Per-cluster containers
+    for cl in clusters:
+        safe_cl = re.sub(r"[\s'\"]+", '_', str(cl))
+        c_df = hier_df[hier_df['Cluster'] == cl].sort_values('Depth')
+
+        html_parts.append(
+            f'<div id="hier_{safe_cl}" class="hier-cluster-container"'
+            f' style="display:none;">')
+
+        # Icicle chart
+        html_parts.append(_build_icicle_chart(c_df, cl))
+
+        # Sortable DataTable
+        header_cols = ['Depth', 'CL ID', 'Cell Type', 'N Supporting',
+                       'Combined Score', 'Confidence', 'Resolution',
+                       'Supporting Types']
+        header = '<tr>' + ''.join(f'<th>{c}</th>' for c in header_cols) + '</tr>'
+
+        table_rows = []
+        for _, row in c_df.iterrows():
+            conf = row.get('Confidence', 0)
+            if conf >= 0.8:
+                color = '#d4edda'
+            elif conf >= 0.5:
+                color = '#fff3cd'
+            else:
+                color = '#f8d7da'
+
+            supporting = str(row.get('Supporting_Types', ''))
+            if len(supporting) > 80:
+                supporting = supporting[:77] + '...'
+
+            cells = [
+                str(row.get('Depth', '')),
+                str(row.get('CL_ID', '')),
+                f"<b>{row.get('Cell_Type', '')}</b>",
+                str(row.get('N_Supporting', '')),
+                f"{row.get('Combined_Score', 0):.2f}",
+                f"{conf:.3f}",
+                str(row.get('Resolution', '')),
+                supporting,
+            ]
+            table_rows.append(
+                f'<tr style="background-color:{color};">'
+                + ''.join(f'<td>{c}</td>' for c in cells) + '</tr>')
+
+        html_parts.append(
+            f'<table id="hier_{safe_cl}_table_data" class="display compact"'
+            f' style="width:100%;margin-top:15px;">'
+            f'<thead>{header}</thead>'
+            f'<tbody>{"".join(table_rows)}</tbody>'
+            f'</table>')
+
+        html_parts.append('</div>')
+
+    return '\n'.join(html_parts)
+
+
+def _build_umap_scatter(umap_data, sample_name):
+    """
+    Build interactive UMAP scatter plot colored by recommended cell type.
+    Uses scattergl (WebGL) for performance with large point counts.
+    """
+    if umap_data is None or umap_data.empty:
+        return ""
+
+    try:
+        fig = go.Figure()
+
+        # Use discrete colors for each cell type
+        cell_types = sorted(umap_data['Top_Cell_Type'].unique(), key=natural_sort_key)
+        colors = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Dark2
+        color_map = {ct: colors[i % len(colors)] for i, ct in enumerate(cell_types)}
+
+        for ct in cell_types:
+            subset = umap_data[umap_data['Top_Cell_Type'] == ct]
+            fig.add_trace(go.Scattergl(
+                x=subset['UMAP-1'], y=subset['UMAP-2'],
+                mode='markers',
+                name=ct,
+                marker=dict(size=3, opacity=0.7,
+                            color='#cccccc' if ct == 'Unannotated' else color_map[ct]),
+                customdata=subset[['Barcode', 'Cluster', 'Top_Cell_Type']].values,
+                hovertemplate=(
+                    '<b>%{customdata[2]}</b><br>'
+                    'Cluster: %{customdata[1]}<br>'
+                    'Barcode: %{customdata[0]}<br>'
+                    'UMAP-1: %{x:.2f}<br>'
+                    'UMAP-2: %{y:.2f}'
+                    '<extra></extra>'
+                ),
+            ))
+
+        fig.update_layout(
+            title=dict(text=f'UMAP — {sample_name}', x=0.5, font=dict(size=16)),
+            xaxis_title='UMAP-1', yaxis_title='UMAP-2',
+            height=600,
+            template='simple_white',
+            legend=dict(title='Cell Type', font=dict(size=11),
+                        itemsizing='constant'),
+            margin=dict(t=60, l=60, r=20, b=60),
+        )
+
+        return fig.to_html(full_html=False, include_plotlyjs=False)
+
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"UMAP scatter plot failed: {e}")
+        return ""
+
+
+def _build_marker_heatmap(top_annotation_df, deg_df):
+    """
+    Build a marker gene heatmap showing top genes driving each cluster annotation.
+    Rows = genes, columns = clusters, values = log2FC.
+    """
+    if top_annotation_df is None or top_annotation_df.empty:
+        return ""
+    if deg_df is None or deg_df.empty:
+        return ""
+
+    try:
+        reshaped = _reshape_deg_df(deg_df)
+
+        # Extract top 5 genes per cluster from the Genes column
+        cluster_genes = {}
+        for _, row in top_annotation_df.iterrows():
+            cluster = row['Cluster']
+            genes_str = str(row.get('Genes', ''))
+            if genes_str and genes_str != 'nan':
+                genes = [g.strip() for g in genes_str.split(',') if g.strip()][:5]
+                cluster_genes[cluster] = genes
+
+        if not cluster_genes:
+            return ""
+
+        # Pool all unique genes
+        all_genes = []
+        gene_to_cluster = {}
+        for cluster, genes in cluster_genes.items():
+            for g in genes:
+                if g not in gene_to_cluster:
+                    gene_to_cluster[g] = cluster
+                all_genes.append(g)
+        unique_genes = list(dict.fromkeys(all_genes))  # preserve order, deduplicate
+
+        if not unique_genes:
+            return ""
+
+        # Get log2FC values for these genes across all clusters
+        reshaped['gene_upper'] = reshaped['Feature Name'].str.upper()
+        gene_upper_set = {g.upper() for g in unique_genes}
+        gene_data = reshaped[reshaped['gene_upper'].isin(gene_upper_set)].copy()
+
+        if gene_data.empty:
+            return ""
+
+        # Pivot: rows=genes, columns=clusters, values=log2FC
+        pivot = gene_data.pivot_table(
+            index='Feature Name', columns='Cluster',
+            values='log2FC', aggfunc='first', fill_value=0
+        )
+        pivot.columns.name = None
+
+        # Reorder rows by which cluster they support (group genes by annotation)
+        sorted_clusters = sorted(cluster_genes.keys(), key=natural_sort_key)
+        ordered_genes = []
+        for cl in sorted_clusters:
+            for g in cluster_genes.get(cl, []):
+                matches = [idx for idx in pivot.index if idx.upper() == g.upper()]
+                ordered_genes.extend(m for m in matches if m not in ordered_genes)
+
+        # Add any remaining genes not matched
+        for g in pivot.index:
+            if g not in ordered_genes:
+                ordered_genes.append(g)
+
+        pivot = pivot.reindex(index=ordered_genes).fillna(0)
+
+        # Reorder columns naturally
+        sorted_cols = sorted(pivot.columns, key=natural_sort_key)
+        pivot = pivot.reindex(columns=sorted_cols)
+
+        # Create color annotations for row labels (which cell type each gene supports)
+        cluster_to_type = dict(zip(
+            top_annotation_df['Cluster'], top_annotation_df['Top_Cell_Type']))
+        row_colors_list = []
+        unique_types = sorted(set(cluster_to_type.values()), key=natural_sort_key)
+        type_palette = sns.color_palette('Set2', n_colors=max(len(unique_types), 1))
+        type_color_map = {t: type_palette[i % len(type_palette)] for i, t in enumerate(unique_types)}
+
+        for gene in pivot.index:
+            assigned_cluster = gene_to_cluster.get(gene, gene_to_cluster.get(gene.upper(), None))
+            if assigned_cluster:
+                ct = cluster_to_type.get(assigned_cluster, 'Other')
+            else:
+                ct = 'Other'
+            row_colors_list.append(type_color_map.get(ct, (0.8, 0.8, 0.8)))
+
+        row_colors = pd.Series(row_colors_list, index=pivot.index, name='Cell Type')
+
+        # Create heatmap
+        fig_h = max(8, len(pivot.index) * 0.3)
+        fig_w = max(10, len(pivot.columns) * 0.5 + 3)
+
+        fig, axes = plt.subplots(1, 2, figsize=(fig_w, fig_h),
+                                  gridspec_kw={'width_ratios': [0.3, 5], 'wspace': 0.02})
+
+        # Color annotation bar
+        for i, color in enumerate(row_colors_list):
+            axes[0].barh(i, 1, color=color, edgecolor='white', linewidth=0.5)
+        axes[0].set_ylim(-0.5, len(pivot.index) - 0.5)
+        axes[0].invert_yaxis()
+        axes[0].set_xlim(0, 1)
+        axes[0].set_xticks([])
+        axes[0].set_yticks([])
+        axes[0].set_xlabel('Cell Type', fontsize=9)
+
+        # Main heatmap
+        vmax = max(abs(pivot.values.min()), abs(pivot.values.max()), 1)
+        sns.heatmap(
+            pivot, ax=axes[1], cmap='RdBu_r', center=0, vmin=-vmax, vmax=vmax,
+            linewidths=0.5, linecolor='lightgray',
+            cbar_kws={'label': 'Log₂ Fold Change', 'shrink': 0.6},
+            yticklabels=True, xticklabels=True
+        )
+        axes[1].set_title('Marker Gene Expression (Top Genes per Annotation)',
+                          fontsize=14, weight='bold', pad=15)
+        axes[1].set_xlabel('Cluster', fontsize=12)
+        axes[1].set_ylabel('')
+        plt.setp(axes[1].get_xticklabels(), rotation=45, ha='right', fontsize=10)
+        plt.setp(axes[1].get_yticklabels(), fontsize=9)
+
+        # Legend for cell type colors
+        from matplotlib.patches import Patch
+        legend_patches = [Patch(facecolor=type_color_map[t], label=t) for t in unique_types
+                          if t in type_color_map]
+        if legend_patches:
+            axes[1].legend(handles=legend_patches, title='Annotation',
+                          loc='upper left', bbox_to_anchor=(1.15, 1),
+                          fontsize=8, title_fontsize=9)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode('utf-8')
+
+        return (
+            f'<div style="position:relative;">'
+            f'<img src="data:image/png;base64,{b64}" loading="lazy" '
+            f'style="width:100%; height:auto;">'
+            f'<br><a download="marker_heatmap.png" href="data:image/png;base64,{b64}" '
+            f'style="display:inline-block;margin:8px 0;padding:6px 16px;background:#007bff;'
+            f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">'
+            f'Download Marker Heatmap</a></div>'
+        )
+
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Marker heatmap failed: {e}")
+        return ""
+
+
+def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
+    """
+    Assemble the complete Cell Type Summary tab content:
+    summary table + UMAP scatter + marker heatmap.
+    """
+    parts = []
+
+    # Summary DataTable
+    if top_annotation_df is not None and not top_annotation_df.empty:
+        df = top_annotation_df.copy()
+
+        # Format columns for display
+        fmt_df = df.copy()
+        if 'P_Value' in fmt_df.columns:
+            fmt_df['P_Value'] = fmt_df['P_Value'].apply(
+                lambda x: f'{x:.2e}' if pd.notna(x) else '—')
+        if 'Score' in fmt_df.columns:
+            fmt_df['Score'] = fmt_df['Score'].apply(
+                lambda x: f'{x:.2f}' if pd.notna(x) else '—')
+        if 'Confidence' in fmt_df.columns:
+            fmt_df['Confidence'] = fmt_df['Confidence'].apply(
+                lambda x: f'{x:.3f}' if pd.notna(x) else '—')
+        if 'N_Databases' in fmt_df.columns:
+            fmt_df['N_Databases'] = fmt_df['N_Databases'].apply(
+                lambda x: str(int(x)) if pd.notna(x) else '—')
+        if 'Genes' in fmt_df.columns:
+            fmt_df['Genes'] = fmt_df['Genes'].apply(
+                lambda x: (str(x)[:60] + '...') if len(str(x)) > 60 else str(x))
+
+        # Rename for display
+        display_cols = {
+            'Cluster': 'Cluster', 'Top_Cell_Type': 'Cell Type',
+            'Broad_Type': 'Broad Type', 'Confidence': 'Confidence',
+            'P_Value': 'P-Value', 'Score': 'Score',
+            'N_Databases': 'N Databases', 'Source': 'Source', 'Genes': 'Top Genes'
+        }
+        cols_present = [c for c in display_cols if c in fmt_df.columns]
+        fmt_df = fmt_df[cols_present].rename(columns=display_cols)
+
+        # Color rows by confidence
+        rows_html = []
+        for _, row in fmt_df.iterrows():
+            conf_str = row.get('Confidence', '—')
+            try:
+                conf_val = float(conf_str)
+                if conf_val >= 0.8:
+                    bg = '#d4edda'
+                elif conf_val >= 0.5:
+                    bg = '#fff3cd'
+                else:
+                    bg = '#f8d7da'
+            except (ValueError, TypeError):
+                bg = '#ffffff'
+
+            cells = ''.join(f'<td>{v}</td>' for v in row.values)
+            rows_html.append(f'<tr style="background-color:{bg};">{cells}</tr>')
+
+        header = '<tr>' + ''.join(f'<th>{c}</th>' for c in fmt_df.columns) + '</tr>'
+        table_html = (
+            f'<table id="summary_annotation_table" class="display compact" '
+            f'style="width:100%;">'
+            f'<thead>{header}</thead>'
+            f'<tbody>{"".join(rows_html)}</tbody>'
+            f'</table>'
+        )
+
+        parts.append('<h3>Recommended Cell Type per Cluster</h3>')
+        parts.append(table_html)
+
+    # UMAP scatter
+    if umap_html:
+        parts.append('<h3 style="margin-top:30px;">UMAP Visualization</h3>')
+        parts.append('<p style="font-size:13px;color:#555;">Interactive scatter plot — '
+                     'hover over points for barcode and cluster details. '
+                     'Use Plotly toolbar to download as PNG/SVG.</p>')
+        parts.append(umap_html)
+
+    # Marker heatmap
+    if heatmap_html:
+        parts.append('<h3 style="margin-top:30px;">Marker Gene Heatmap</h3>')
+        parts.append('<p style="font-size:13px;color:#555;">Log₂ fold change of top '
+                     'marker genes driving each cluster annotation. Genes grouped by '
+                     'recommended cell type (color bar on left).</p>')
+        parts.append(heatmap_html)
+
+    return '\n'.join(parts)
+
+
+def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_maps, deg_table_html, params_maps, selected_tissue_name=None, hierarchical_results=None, top_annotation_df=None, umap_data=None, deg_df=None):
     report_data = {}
     for ctx, levels in sig_results_maps.items():
         report_data[ctx] = {}
         for lvl, res in levels.items():
+            if lvl == 'hierarchical':
+                continue  # handled separately
             tid = f"results_table_{ctx}_{lvl}"
             html, genes = _prepare_sig_table(res, tid)
             report_data[ctx][lvl] = {
                 'table': html, 'has_genes': genes, 'id': tid,
                 'plots': plots_html_maps[ctx][lvl], 'params': params_maps[ctx][lvl]
             }
+
+    # Build hierarchy HTML section
+    hierarchy_html = _build_hierarchy_html(hierarchical_results or {})
+
+    # Build summary tab content
+    summary_html = ""
+    if top_annotation_df is not None and not top_annotation_df.empty:
+        umap_html = _build_umap_scatter(umap_data, sample_name) if umap_data is not None else ""
+        heatmap_html = _build_marker_heatmap(top_annotation_df, deg_df) if deg_df is not None else ""
+        summary_html = _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html)
 
     t = """
     <!DOCTYPE html>
@@ -481,6 +1014,9 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
             td.dt-control { background: url('https://datatables.net/examples/resources/details_open.png') no-repeat center center; cursor: pointer; } 
             tr.shown td.dt-control { background: url('https://datatables.net/examples/resources/details_close.png') no-repeat center center; } 
             .view-section { display: none; }
+            .tab-explanation { background-color:#f0f7ff; border-left:4px solid #007bff; padding:12px 16px; margin-bottom:20px; border-radius:0 4px 4px 0; font-size:13px; line-height:1.5; }
+            .tab-explanation summary { cursor:pointer; font-size:14px; color:#0056b3; }
+            .hier-cluster-container { display:none; }
         </style>
     </head><body>
     <div class="container">
@@ -494,13 +1030,36 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
             {% endfor %}
         {% endfor %}
 
-        <div class="tabs"> 
-            <div class="tab-link active" onclick="openTab(event, 'degs')">DEG Browser</div> 
-            <div class="tab-link" onclick="openTab(event, 'visuals')">Enrichment Visuals</div> 
-            <div class="tab-link" onclick="openTab(event, 'results')">Hypergeometric Result</div> 
+        <div class="tabs">
+            {% if summary_html %}<div class="tab-link active" onclick="openTab(event, 'summary')">Cell Type Summary</div>{% endif %}
+            <div class="tab-link {% if not summary_html %}active{% endif %}" onclick="openTab(event, 'degs')">DEG Browser</div>
+            <div class="tab-link" onclick="openTab(event, 'visuals')">Enrichment Visuals</div>
+            <div class="tab-link" onclick="openTab(event, 'results')">Hypergeometric Result</div>
+            {% if hierarchy_html %}<div class="tab-link" onclick="openTab(event, 'hierarchy')">Hierarchy</div>{% endif %}
         </div>
-        
-        <div id="degs" class="tab-content active">{{ deg_tables|safe }}</div>
+
+        {% if summary_html %}
+        <div id="summary" class="tab-content active">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Recommended cell type annotations for each cluster based on enrichment analysis.
+                Table shows top annotation per cluster with confidence scoring. UMAP (when available)
+                shows cluster identities colored by cell type. Marker heatmap shows top genes
+                driving each annotation.</p>
+            </details>
+            {{ summary_html|safe }}
+        </div>
+        {% endif %}
+
+        <div id="degs" class="tab-content {% if not summary_html %}active{% endif %}">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Differentially expressed genes for each cluster that passed filtering thresholds.
+                Select a cluster to view its gene list. Violin plots show p-value, log2FC, and
+                mean counts distributions. Bar chart shows genes per cluster used for enrichment.</p>
+            </details>
+            {{ deg_tables|safe }}
+        </div>
         
         <div id="global_controls" style="display:none;">
              <div class="level-selector">
@@ -519,6 +1078,13 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         </div>
         
         <div id="visuals" class="tab-content">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Enrichment heatmap scoring cell types (columns) against clusters (rows). Color
+                intensity = enrichment score. Use Top N selector to control displayed cell types.
+                Bar chart shows total significant hits per cluster. Use Tissue Scope and
+                Annotation Level selectors to switch analysis contexts.</p>
+            </details>
             <div id="visuals_controls_placeholder"></div>
             {% for context, levels in report_data.items() %}
                 {% for level, data in levels.items() %}
@@ -542,6 +1108,13 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         </div>
         
         <div id="results" class="tab-content">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Full statistical results from hypergeometric enrichment test. Key columns:
+                adj_p_value (BH-corrected), Enrichment_ratio (observed/expected overlap),
+                Overlapping_genes (click expand arrow for full list). Table is sortable and
+                exportable. Use Tissue/Level selectors to switch views.</p>
+            </details>
             <div id="results_controls_placeholder"></div>
             {% for context, levels in report_data.items() %}
                 {% for level, data in levels.items() %}
@@ -551,6 +1124,19 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
                 {% endfor %}
             {% endfor %}
         </div>
+
+        {% if hierarchy_html %}
+        <div id="hierarchy" class="tab-content">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Multi-resolution cell type annotation via Cell Ontology traversal. Significant
+                enrichment hits are mapped upward through the ontology tree. Select a cluster
+                to see its icicle chart and details table. Confidence = fraction of known
+                subtypes supporting the annotation. Green &ge;0.8, yellow 0.5-0.8, red &lt;0.5.</p>
+            </details>
+            {{ hierarchy_html|safe }}
+        </div>
+        {% endif %}
     </div>
     
     <script> 
@@ -562,7 +1148,7 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         for(i=0; i<tablinks.length; i++) tablinks[i].className = tablinks[i].className.replace(" active", "");
         document.getElementById(tabName).style.display = "block";
         e.currentTarget.className += " active";
-        
+
         var controls = document.getElementById('global_controls');
         if(tabName === 'visuals') {
             controls.style.display = 'block';
@@ -573,7 +1159,18 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         } else {
             controls.style.display = 'none';
         }
-        
+
+        // Lazy-init summary DataTable
+        if(tabName === 'summary') {
+            var tid = "#summary_annotation_table";
+            if($(tid).length && !$.fn.DataTable.isDataTable(tid)) {
+                $(tid).DataTable({
+                    pageLength: 50, dom: "Bfrtip", buttons: ["copy", "csv"],
+                    order: [[0, "asc"]]
+                });
+            }
+        }
+
         // Resize plotly charts when tab becomes visible
         window.dispatchEvent(new Event('resize'));
     } 
@@ -636,19 +1233,38 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         }
     }
 
+    function showHierarchy(id){
+        $(".hier-cluster-container").hide();
+        if(id){
+            var safeId = id.replace(/[\s'"]/g, '_');
+            $("#"+safeId).show();
+            var tableId = "#"+safeId+"_table_data";
+            if(!$.fn.DataTable.isDataTable(tableId)){
+                $(tableId).DataTable({
+                    pageLength:25, dom:"Bfrtip", buttons:["copy","csv"],
+                    order:[[0,"asc"],[5,"desc"]]
+                });
+            }
+            window.dispatchEvent(new Event('resize'));
+        }
+    }
+
     $(document).ready(function(){
         updateView();
-        openTab({currentTarget:document.querySelector(".tab-link.active")},"degs");
+        var defaultTab = document.getElementById('summary') ? 'summary' : 'degs';
+        openTab({currentTarget:document.querySelector(".tab-link.active")}, defaultTab);
     });
     </script>
     </body></html>
     """
     
     html_content = Template(t).render(
-        sample_name=sample_name, 
+        sample_name=sample_name,
         deg_tables=deg_table_html,
         report_data=report_data,
-        selected_tissue_name=selected_tissue_name
+        selected_tissue_name=selected_tissue_name,
+        hierarchy_html=hierarchy_html,
+        summary_html=summary_html,
     )
     
     with open(output_path, "w", encoding='utf-8') as f: 

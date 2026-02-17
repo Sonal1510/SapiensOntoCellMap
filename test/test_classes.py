@@ -28,6 +28,7 @@ def run_downloader_tests():
     print("--- Running BioDataDownloader Tests ---")
     downloader = BioDataDownloader()
     downloader.download_all_databases() # Run the download process
+    downloader.download_reference_data() # Download HGNC alias map + other reference files
     print("🎉 Downloader test completed. Check logs for successes or failures.")
     print("--- BioDataDownloader Tests Completed ---\n")
 

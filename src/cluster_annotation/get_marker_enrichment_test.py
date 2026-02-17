@@ -17,6 +17,114 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
+# Known column schemas for auto-detecting DEG input formats
+SCRNA_COLUMN_SCHEMAS = {
+    'seurat': {
+        'Feature Name': ['gene'],
+        'Cluster': ['cluster'],
+        'Adjusted p value': ['p_val_adj'],
+        'Log2 fold change': ['avg_log2FC'],
+    },
+    'scanpy': {
+        'Feature Name': ['names'],
+        'Cluster': ['group'],
+        'Adjusted p value': ['pvals_adj'],
+        'Log2 fold change': ['logfoldchanges'],
+    },
+    'generic': {
+        'Feature Name': ['Gene', 'gene_name', 'feature', 'symbol', 'Gene.name'],
+        'Cluster': ['cluster_id', 'ident', 'celltype', 'group_id'],
+        'Adjusted p value': ['padj', 'FDR', 'q_value', 'adj.P.Val', 'p_val_adj'],
+        'Log2 fold change': ['log2FoldChange', 'logFC', 'avg_logFC', 'log2fc'],
+    },
+}
+
+
+def _detect_deg_format(columns, forced_format=None):
+    """
+    Auto-detect DEG input format by matching column names against known schemas.
+
+    Args:
+        columns: list of column names from the input DataFrame
+        forced_format: if set, skip auto-detection and use this format
+
+    Returns:
+        (format_name, rename_dict) where rename_dict maps original → standard names
+    """
+    col_set = set(columns)
+
+    if forced_format and forced_format in SCRNA_COLUMN_SCHEMAS:
+        schema = SCRNA_COLUMN_SCHEMAS[forced_format]
+        rename = {}
+        for std_name, possible_names in schema.items():
+            for pn in possible_names:
+                if pn in col_set:
+                    rename[pn] = std_name
+                    break
+        return forced_format, rename
+
+    # Try each schema in priority order: seurat, scanpy, then generic
+    for fmt_name in ['seurat', 'scanpy', 'generic']:
+        schema = SCRNA_COLUMN_SCHEMAS[fmt_name]
+        rename = {}
+        matched_all = True
+        for std_name, possible_names in schema.items():
+            found = False
+            for pn in possible_names:
+                if pn in col_set:
+                    rename[pn] = std_name
+                    found = True
+                    break
+            if not found:
+                matched_all = False
+                break
+        if matched_all:
+            return fmt_name, rename
+
+    # No match found — return None
+    return None, {}
+
+def _build_hgnc_alias_map(hgnc_path):
+    """
+    Build a gene alias → approved symbol mapping from the HGNC complete set file.
+
+    Parses the 'symbol', 'alias_symbol', and 'prev_symbol' columns to create
+    a dictionary mapping all known aliases (uppercased) to their approved
+    HGNC symbol (uppercased).
+
+    Args:
+        hgnc_path: Path to hgnc_complete_set.txt (tab-separated)
+
+    Returns:
+        dict: {alias_upper: approved_symbol_upper}
+    """
+    try:
+        df = pd.read_csv(hgnc_path, sep='\t', usecols=['symbol', 'alias_symbol', 'prev_symbol'],
+                         dtype=str, na_values=[''])
+    except (ValueError, FileNotFoundError) as e:
+        logging.warning(f"Could not load HGNC file: {e}")
+        return {}
+
+    alias_map = {}
+    for _, row in df.iterrows():
+        approved = str(row['symbol']).strip().upper() if pd.notna(row['symbol']) else None
+        if not approved:
+            continue
+        for alias_col in ['alias_symbol', 'prev_symbol']:
+            raw = row[alias_col]
+            if pd.isna(raw):
+                continue
+            # HGNC uses '|' as delimiter within alias columns
+            aliases = str(raw).split('|')
+            for alias in aliases:
+                alias_clean = alias.strip().upper()
+                if alias_clean and alias_clean != approved:
+                    # First mapping wins — approved symbols shouldn't be overridden
+                    if alias_clean not in alias_map:
+                        alias_map[alias_clean] = approved
+    return alias_map
+
+
 class MarkerEnrichmentTest:
     def __init__(
         self,
@@ -29,6 +137,8 @@ class MarkerEnrichmentTest:
         top_genes=None,
         min_overlap=2,
         background_gene_count=None,
+        hgnc_map=None,
+        deg_format=None,
     ):
         if not deg_file or not os.path.exists(deg_file):
             raise FileNotFoundError(f"DEG file not found: {deg_file}")
@@ -83,6 +193,56 @@ class MarkerEnrichmentTest:
         self.top_genes = top_genes
         self.min_overlap = min_overlap
         self.N_override = background_gene_count
+        self.deg_format = deg_format
+
+        # --- HGNC Gene Alias Resolution ---
+        self.alias_map = {}
+        hgnc_path = hgnc_map
+        if hgnc_path is None:
+            # Try config path first, then fall back to relative path
+            try:
+                import sys
+                _proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+                if _proj_root not in sys.path:
+                    sys.path.insert(0, _proj_root)
+                from config.config import HGNC_COMPLETE_SET_FILE
+                if os.path.exists(HGNC_COMPLETE_SET_FILE):
+                    hgnc_path = HGNC_COMPLETE_SET_FILE
+            except ImportError:
+                pass
+            if hgnc_path is None:
+                default_hgnc = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'reference', 'hgnc_complete_set.txt')
+                if os.path.exists(default_hgnc):
+                    hgnc_path = default_hgnc
+        if hgnc_path and os.path.exists(hgnc_path):
+            self.alias_map = _build_hgnc_alias_map(hgnc_path)
+            logging.info(f"Loaded {len(self.alias_map)} gene aliases from HGNC map")
+        elif hgnc_map:
+            logging.warning(f"HGNC map file not found: {hgnc_map}. Skipping alias resolution.")
+
+        # Resolve marker DB genes to approved HGNC symbols
+        if self.alias_map:
+            resolved_marker_count = 0
+            for cell_type in list(self.marker_dict_internal.keys()):
+                genes = self.marker_dict_internal[cell_type]
+                resolved = {}
+                for gene, weight in genes.items():
+                    canonical = self.alias_map.get(gene, gene)
+                    if canonical != gene:
+                        resolved_marker_count += 1
+                    if canonical in resolved:
+                        resolved[canonical] = max(resolved[canonical], weight)
+                    else:
+                        resolved[canonical] = weight
+                    # Keep display name for canonical
+                    if canonical not in self._gene_display_name:
+                        self._gene_display_name[canonical] = self._gene_display_name.get(gene, gene)
+                self.marker_dict_internal[cell_type] = resolved
+            # Update all_db_genes
+            all_db_genes = set()
+            for v in self.marker_dict_internal.values():
+                all_db_genes.update(v.keys())
+            logging.info(f"Gene alias resolution: {resolved_marker_count} marker genes resolved to approved HGNC symbols")
 
         self.deg_df_long = self._normalize_deg_df()
 
@@ -114,14 +274,44 @@ class MarkerEnrichmentTest:
         self.results_ = pd.DataFrame()
 
     def _normalize_deg_df(self):
-        # ... (Same normalization logic) ...
         if self.deg_file_type == 'scrna':
             df = self.raw_deg_df.copy()
-            rename = {'gene': 'Feature Name', 'cluster': 'Cluster', 'p_val_adj': 'Adjusted p value', 'avg_log2FC': 'Log2 fold change'}
+
+            # Auto-detect or force input format
+            fmt_name, rename = _detect_deg_format(df.columns.tolist(), forced_format=self.deg_format)
+
+            if fmt_name is None:
+                expected = []
+                for schema_name, schema in SCRNA_COLUMN_SCHEMAS.items():
+                    cols = [aliases[0] for aliases in schema.values()]
+                    expected.append(f"  {schema_name}: {cols}")
+                raise ValueError(
+                    f"Could not auto-detect DEG input format. Columns found: {df.columns.tolist()}\n"
+                    f"Expected one of:\n" + "\n".join(expected) + "\n"
+                    f"Use --deg_format to force a specific format."
+                )
+
+            logging.info(f"Auto-detected DEG format: {fmt_name} (columns: {list(rename.keys())})")
             df.rename(columns=rename, inplace=True)
-            if 'Mean Counts' not in df.columns: df['Mean Counts'] = 0
+
+            if 'Mean Counts' not in df.columns:
+                df['Mean Counts'] = 0
             df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
             df['Feature Name'] = df['Feature Name'].astype(str).str.strip().str.upper()
+
+            # Resolve DEG gene aliases
+            if self.alias_map:
+                resolved_count = 0
+                resolved_names = []
+                for gene in df['Feature Name']:
+                    canonical = self.alias_map.get(gene, gene)
+                    if canonical != gene:
+                        resolved_count += 1
+                    resolved_names.append(canonical)
+                df['Feature Name'] = resolved_names
+                if resolved_count > 0:
+                    logging.info(f"Gene alias resolution: {resolved_count} DEG genes resolved to approved HGNC symbols")
+
             return df[['Feature Name', 'Cluster', 'Adjusted p value', 'Log2 fold change', 'Mean Counts']]
         elif self.deg_file_type == 'spatial':
             df = self.raw_deg_df.copy()
@@ -133,6 +323,20 @@ class MarkerEnrichmentTest:
             df.rename(columns={'Adjusted p value': 'Adjusted p value', 'Log2 fold change': 'Log2 fold change', 'Mean Counts': 'Mean Counts'}, inplace=True)
             df.fillna({'Adjusted p value': 1.0, 'Log2 fold change': 0.0, 'Mean Counts': 0.0}, inplace=True)
             df['Feature Name'] = df['Feature Name'].astype(str).str.strip().str.upper()
+
+            # Resolve spatial DEG gene aliases
+            if self.alias_map:
+                resolved_count = 0
+                resolved_names = []
+                for gene in df['Feature Name']:
+                    canonical = self.alias_map.get(gene, gene)
+                    if canonical != gene:
+                        resolved_count += 1
+                    resolved_names.append(canonical)
+                df['Feature Name'] = resolved_names
+                if resolved_count > 0:
+                    logging.info(f"Gene alias resolution: {resolved_count} spatial DEG genes resolved to approved HGNC symbols")
+
             return df
         else:
             raise ValueError(f"Unknown type: {self.deg_file_type}")

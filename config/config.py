@@ -20,10 +20,17 @@ SQLITE_DB_PATH = os.path.join(BASE_DATA_DIR, 'sapiens_ontocellmap.sqlite')
 PROCESSED_COMBINED_DATABASE_FILE = os.path.join(PROCESSED_COMBINED_DATA_DIR, "master_cell_marker_db.csv")
 PROCESSED_COMBINED_DATABASE_FILE_HTML = os.path.join(PROCESSED_COMBINED_DATA_DIR, "sapiens_visualizer.html")
 
+REFERENCE_DATA_DIR = os.path.join(BASE_DATA_DIR, 'reference')
+
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
 os.makedirs(RECOVER_ID_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_COMBINED_DATA_DIR, exist_ok=True)
+os.makedirs(REFERENCE_DATA_DIR, exist_ok=True)
+
+# --- Reference Data Files ---
+HGNC_COMPLETE_SET_URL = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
+HGNC_COMPLETE_SET_FILE = os.path.join(REFERENCE_DATA_DIR, "hgnc_complete_set.txt")
 
 
 # --- Dynamic Database and Parser Configuration ---
