@@ -36,7 +36,7 @@ def plot_dynamic_heatmap_with_bars(
     cluster_axes: bool = True
 ) -> str:
     """
-    Generates a heatmap with high resolution (300 DPI) but maintaining the old style/colors.
+    Generates a heatmap at 150 DPI (screen-optimized) with download button, maintaining the old style/colors.
     """
     if sig_results_df.empty:
         return f"<h3>Heatmap (Top {top_n_celltypes})</h3><p>No significant enrichments found.</p>"
@@ -159,11 +159,18 @@ def plot_dynamic_heatmap_with_bars(
             ax_bar.text(width * 1.01, bar.get_y() + bar.get_height()/2., '%d' % int(width), ha='left', va='center', fontsize=8)
             
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('utf-8')
-    return f'<img src="data:image/png;base64,{b64}" style="width:100%; height:auto;">'
+    return (
+        f'<div style="position:relative;">'
+        f'<img src="data:image/png;base64,{b64}" loading="lazy" style="width:100%; height:auto;">'
+        f'<br><a download="heatmap.png" href="data:image/png;base64,{b64}" '
+        f'style="display:inline-block;margin:8px 0;padding:6px 16px;background:#007bff;'
+        f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">'
+        f'Download Heatmap</a></div>'
+    )
 
 def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
     # Standardize DEG DF to long format
@@ -205,15 +212,30 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
     custom_data_cols = ['Feature Name', 'adj_p_value', 'log2FC', 'mean_counts']
     hover_template = '<b>%{customdata[0]}</b><br>Cluster: %{x}<br>Adj p-value: %{customdata[1]:.2e}<br>Log2FC: %{customdata[2]:.2f}<br>Mean Counts: %{customdata[3]:.2f}<extra></extra>'
 
+    # Adaptive display: for large datasets, subsample per cluster to keep violin shape
+    # accurate while cutting Plotly JSON size by ~90%
+    MAX_POINTS_PER_CLUSTER = 1000
+    if len(filtered_deg_df) > 5000:
+        point_mode = 'outliers'
+        sampled_parts = []
+        for _, grp in filtered_deg_df.groupby('Cluster', observed=True):
+            sampled_parts.append(grp.sample(n=min(len(grp), MAX_POINTS_PER_CLUSTER), random_state=42))
+        plot_df = pd.concat(sampled_parts, ignore_index=True)
+        # Restore categorical ordering after groupby
+        plot_df['Cluster'] = pd.Categorical(plot_df['Cluster'], categories=sorted_clusters, ordered=True)
+    else:
+        point_mode = 'all'
+        plot_df = filtered_deg_df
+
     # --- Plot 1: Adjusted p-value (LINEAR SCALE as requested) ---
     fig_p_val = px.violin(
-        filtered_deg_df, x='Cluster', y='adj_p_value', box=True, points='all',
+        plot_df, x='Cluster', y='adj_p_value', box=True, points=point_mode,
         title='Adjusted p-value Distribution', color='Cluster',
         custom_data=custom_data_cols
     )
     fig_p_val.update_traces(
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
-        points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
+        points=point_mode, jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
     # Reverting to Linear scale as requested by "let it be adj pvalue instead of log"
     fig_p_val.update_layout(xaxis_title='', yaxis=dict(title_text='Adjusted p-value'))
@@ -225,19 +247,19 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
     # --- Plot 2: Log2 Fold Change (Symlog) ---
     C = 1.0
     symlog_transform = lambda x: np.sign(x) * np.log1p(np.abs(x / C))
-    filtered_deg_df['log2FC_transformed'] = symlog_transform(filtered_deg_df['log2FC'])
+    plot_df['log2FC_transformed'] = symlog_transform(plot_df['log2FC'])
 
     fig_log2fc = px.violin(
-        filtered_deg_df, x='Cluster', y='log2FC_transformed', box=True, points='all',
+        plot_df, x='Cluster', y='log2FC_transformed', box=True, points=point_mode,
         title='Log2 Fold Change Distribution', color='Cluster',
         custom_data=custom_data_cols
     )
     fig_log2fc.update_traces(
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
-        points='all', jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
+        points=point_mode, jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
 
-    max_abs_val = filtered_deg_df['log2FC'].abs().max()
+    max_abs_val = plot_df['log2FC'].abs().max()
     tick_values_orig = [0]
     if max_abs_val > 0 and log2fc_thresh > 0:
         positive_ticks = [10**i for i in range(int(np.floor(np.log10(log2fc_thresh))), int(np.ceil(np.log10(max_abs_val)))+1)]
@@ -246,8 +268,8 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
     tick_values_orig = sorted(list(set(tick_values_orig)))
     tick_values_transformed = [symlog_transform(v) for v in tick_values_orig]
 
-    min_fc = filtered_deg_df['log2FC'].min()
-    max_fc = filtered_deg_df['log2FC'].max()
+    min_fc = plot_df['log2FC'].min()
+    max_fc = plot_df['log2FC'].max()
     range_min = symlog_transform(min_fc - 0.1)
     range_max = symlog_transform(max_fc + 1)
 
@@ -267,9 +289,9 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
 
     # --- Plot 3: Mean Counts (Box Plot) ---
     mean_counts_html = ""
-    if 'mean_counts' in filtered_deg_df.columns and filtered_deg_df['mean_counts'].sum() > 1e-6:
+    if 'mean_counts' in plot_df.columns and plot_df['mean_counts'].sum() > 1e-6:
         fig_mean_counts = px.box(
-            filtered_deg_df, x='Cluster', y='mean_counts',
+            plot_df, x='Cluster', y='mean_counts',
             color='Cluster', points='outliers', custom_data=custom_data_cols
         )
         fig_mean_counts.update_traces(
@@ -287,7 +309,7 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
             )
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
 
-    p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs='cdn') # include JS here once
+    p_val_html = fig_p_val.to_html(full_html=False, include_plotlyjs=False) # JS already loaded in header CDN
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
 
     combined_html = f"""
@@ -492,7 +514,7 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
             <div id="results_controls_placeholder"></div>
             {% for context, levels in report_data.items() %}
                 {% for level, data in levels.items() %}
-                <div id="results_{{ context }}_{{ level }}" class="view-section results-section">
+                <div id="results_{{ context }}_{{ level }}" class="view-section results-section" data-has-genes="{{ 'true' if data.has_genes else 'false' }}" data-table-id="{{ data.id }}">
                     {{ data.table|safe }}
                 </div>
                 {% endfor %}
@@ -525,6 +547,29 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         window.dispatchEvent(new Event('resize'));
     } 
 
+    function initResultsTable(tableId, hasGenes) {
+        if (!$(tableId).length || $.fn.DataTable.isDataTable(tableId)) return;
+        var t = $(tableId).DataTable({
+            pageLength: 25, dom: "Bfrtip", buttons: ["copy", "csv", "excel"]
+        });
+        if (hasGenes) {
+            var gIdx = -1;
+            $(tableId + ' thead th').each(function(i){ if($(this).text()=='Full Gene List') gIdx=i; });
+            if (gIdx > -1) {
+                t.column(gIdx).visible(false);
+                $(tableId + ' tbody').on('click', 'td.dt-control', function(){
+                    var tr = $(this).closest('tr'), row = t.row(tr);
+                    if(row.child.isShown()){ row.child.hide(); tr.removeClass('shown'); }
+                    else {
+                        var g = t.cell(row.index(), gIdx).data();
+                        row.child('<div style="background:#f9f9f9;padding:10px;border-left:4px solid #007bff"><b>Genes:</b><br>'+g+'</div>').show();
+                        tr.addClass('shown');
+                    }
+                });
+            }
+        }
+    }
+
     function updateView() {
         var tissue = document.getElementById('tissue_select').value;
         var level = document.getElementById('level_select').value;
@@ -533,13 +578,21 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         $('#visuals_' + tissue + '_' + level).show();
         $('#results_' + tissue + '_' + level).show();
         $('#params_' + tissue + '_' + level).show();
+
+        // Lazy-init DataTable for the now-visible result section
+        var wrapper = document.getElementById('results_' + tissue + '_' + level);
+        if (wrapper) {
+            var tid = wrapper.getAttribute('data-table-id');
+            var hasGenes = wrapper.getAttribute('data-has-genes') === 'true';
+            if (tid) initResultsTable('#' + tid, hasGenes);
+        }
     }
 
     function showPlot(groupKey, nVal){
-        $('.plot-group-' + groupKey.replace('_', '-')).hide(); 
+        $('.plot-group-' + groupKey.replaceAll('_', '-')).hide();
         $('#heatmap_' + groupKey + '_' + nVal).show();
     }
-    
+
     function showTable(id){
         $(".deg-table-container").hide();
         if(id){
@@ -550,44 +603,12 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
                 $(tableId).DataTable({pageLength:10,dom:"Bfrtip",buttons:["copy","csv"]})
             }
         }
-    } 
-    
+    }
+
     $(document).ready(function(){
-        {% for context, levels in report_data.items() %}
-            {% for level, data in levels.items() %}
-            (function(){
-                var tableId = "#{{ data.id }}";
-                var has_genes = {{ 'true' if data.has_genes else 'false' }};
-                if($(tableId).length){
-                    var t = $(tableId).DataTable({
-                        pageLength: 25, dom: "Bfrtip", buttons: ["copy", "csv", "excel"]
-                    });
-                    
-                    if(has_genes){
-                        var gIdx = -1;
-                        $(tableId + ' thead th').each(function(i){ if($(this).text()=='Full Gene List') gIdx=i; });
-                        
-                        if(gIdx > -1){
-                            t.column(gIdx).visible(false);
-                            $(tableId + ' tbody').on('click', 'td.dt-control', function(){
-                                var tr = $(this).closest('tr'), row = t.row(tr);
-                                if(row.child.isShown()){ row.child.hide(); tr.removeClass('shown'); }
-                                else {
-                                    var g = t.cell(row.index(), gIdx).data();
-                                    row.child('<div style="background:#f9f9f9;padding:10px;border-left:4px solid #007bff"><b>Genes:</b><br>'+g+'</div>').show();
-                                    tr.addClass('shown');
-                                }
-                            });
-                        }
-                    }
-                }
-            })();
-            {% endfor %}
-        {% endfor %}
-        
         updateView();
         openTab({currentTarget:document.querySelector(".tab-link.active")},"degs");
-    }); 
+    });
     </script>
     </body></html>
     """
