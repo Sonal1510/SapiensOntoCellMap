@@ -458,7 +458,7 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
         <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
-        <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+        <script src="https://cdn.plot.ly/plotly-3.1.1.min.js"></script>
         <style> 
             body{font-family:Arial,sans-serif;margin:0;padding:0;background-color:#f8f9fa} 
             .container{width:95%;margin:20px auto;padding:20px;background-color:#fff;box-shadow:0 4px 8px #0000001a;border-radius:8px} 
