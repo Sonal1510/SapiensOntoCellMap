@@ -227,7 +227,7 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
         point_mode = 'all'
         plot_df = filtered_deg_df
 
-    # --- Plot 1: Adjusted p-value (LINEAR SCALE as requested) ---
+    # --- Plot 1: Adjusted p-value (Log Scale with Visual Floor) ---
     fig_p_val = px.violin(
         plot_df, x='Cluster', y='adj_p_value', box=True, points=point_mode,
         title='Adjusted p-value Distribution', color='Cluster',
@@ -237,8 +237,14 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
         hovertemplate=hover_template, box_visible=True, meanline_visible=True,
         points=point_mode, jitter=0.5, pointpos=0, marker_opacity=0.6, marker_size=4
     )
-    # Reverting to Linear scale as requested by "let it be adj pvalue instead of log"
-    fig_p_val.update_layout(xaxis_title='', yaxis=dict(title_text='Adjusted p-value'))
+    p_val_floor = 1e-100
+    non_zero_pvals = plot_df['adj_p_value'][plot_df['adj_p_value'] > 0]
+    yaxis_pval_dict = dict(title_text='Adjusted p-value (Log Scale)', type="log", tickformat=".1e")
+    if not non_zero_pvals.empty:
+        min_pval_for_display = max(non_zero_pvals.min(), p_val_floor)
+        max_pval_range = non_zero_pvals.max() + 10
+        yaxis_pval_dict['range'] = [np.log10(min_pval_for_display), np.log10(max_pval_range)]
+    fig_p_val.update_layout(xaxis_title='', yaxis=yaxis_pval_dict)
     fig_p_val.add_hline(
         y=p_val_thresh, line_dash="dash", line_color="red",
         annotation_text=f"p-value threshold = {p_val_thresh}", annotation_position="top left"
@@ -284,10 +290,10 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
     )
     fig_log2fc.add_hline(
         y=symlog_transform(log2fc_thresh), line_dash="dash", line_color="red",
-        annotation_text=f"Threshold = {log2fc_thresh}", annotation_position="bottom right"
+        annotation_text=f"Upregulated Log\u2082FC threshold = {log2fc_thresh}", annotation_position="bottom right"
     )
 
-    # --- Plot 3: Mean Counts (Box Plot) ---
+    # --- Plot 3: Mean Counts (Box Plot, publication quality) ---
     mean_counts_html = ""
     if 'mean_counts' in plot_df.columns and plot_df['mean_counts'].sum() > 1e-6:
         fig_mean_counts = px.box(
@@ -297,15 +303,35 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
         fig_mean_counts.update_traces(
             hovertemplate=hover_template, marker=dict(opacity=0.7, size=4)
         )
-        
+        counts_floor = 1e-4
+        non_zero_counts = plot_df['mean_counts'][plot_df['mean_counts'] > 0]
+        yaxis_counts_dict = dict(title_text='Mean Counts (Log Scale)', type="log")
+        if not non_zero_counts.empty:
+            q_low = non_zero_counts.quantile(0.005)
+            q_high = non_zero_counts.quantile(0.995)
+            min_for_display = max(q_low, counts_floor)
+            range_min_val = min_for_display * 0.5
+            range_max_val = q_high * 2.0
+            if range_max_val > range_min_val:
+                yaxis_counts_dict['range'] = [np.log10(range_min_val), np.log10(range_max_val)]
+                min_power = np.floor(np.log10(range_min_val))
+                max_power = np.ceil(np.log10(range_max_val))
+                tick_values = [10**i for i in range(int(min_power), int(max_power) + 1)]
+                tick_values = [v for v in tick_values if range_min_val <= v <= range_max_val]
+                if tick_values:
+                    yaxis_counts_dict['tickvals'] = tick_values
+                    yaxis_counts_dict['ticktext'] = [f'{v:g}' for v in tick_values]
         fig_mean_counts.update_layout(
             title_text='Distribution of Mean Gene Counts per Cluster', xaxis_title='Cluster',
-            yaxis=dict(title_text='Mean Counts (Log Scale)', type="log"), showlegend=False
+            yaxis=yaxis_counts_dict, showlegend=False,
+            template='simple_white', font=dict(size=12), title=dict(x=0.5, font=dict(size=16))
         )
         if mean_counts_thresh > 0:
             fig_mean_counts.add_hline(
                 y=mean_counts_thresh, line_dash="dash", line_color="red", line_width=2,
-                annotation_text=f"Threshold = {mean_counts_thresh:.2f}"
+                layer="above",
+                annotation_text=f"Mean counts threshold = {mean_counts_thresh:.2f}",
+                annotation_position="top right"
             )
         mean_counts_html = fig_mean_counts.to_html(full_html=False, include_plotlyjs=False)
 
@@ -325,9 +351,12 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
 def plot_deg_counts_barchart(markers):
     if not markers: return ""
     s = pd.Series({k:len(v) for k,v in markers.items()})
+    s = s[s > 0]
+    if s.empty: return "<h3>DEGs per Cluster</h3><p>No differentially expressed genes found for any cluster.</p>"
     s = s.reindex(sorted(s.index, key=natural_sort_key))
-    fig = px.bar(x=s.index, y=s.values, title="DEGs per Cluster", 
-                 labels={'x':'Cluster', 'y':'Count'}, color=s.index)
+    fig = px.bar(x=s.index, y=s.values,
+                 title='Number of Genes per Cluster for Hypergeometric Test',
+                 labels={'x':'Cluster', 'y':'Number of Genes'}, color=s.index, text=s.values)
     fig.update_layout(showlegend=False)
     fig.update_traces(marker_color='steelblue')
     return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False, include_plotlyjs=False)}<hr style="margin: 25px 0;">'
