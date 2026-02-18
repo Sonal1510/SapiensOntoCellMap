@@ -3,372 +3,606 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SapiensOntoCellMap Visualizer</title>
-    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
+    <title>SapiensOntoCellMap Database Explorer</title>
+    <script src="https://cdn.plot.ly/plotly-3.1.1.min.js" charset="utf-8"></script>
     <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 
     <style>
         :root {
-            --header-height: 50px;
-            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --bg-color: #f8f9fa;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --bg: #f1f5f9;
             --panel-bg: #ffffff;
-            --panel-border: #dee2e6;
-            --panel-header-bg: #f1f3f5;
-            --text-color: #212529;
-            --text-muted: #6c757d;
-            --primary-color: #007bff;
-            --highlight-color: #dc3545; /* Red for highlighting */
-            --muted-color: #adb5bd;   /* Grey for muted dots */
-            --shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            --border-radius: 0.5rem;
+            --border: #e2e8f0;
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --primary-light: #dbeafe;
+            --success: #059669;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --radius: 10px;
+            --header-h: 56px;
         }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: var(--font-family);
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 0;
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            height: 100vh;
             overflow: hidden;
         }
+
+        /* --- HEADER --- */
         header {
-            height: var(--header-height);
-            background-color: var(--panel-bg);
-            border-bottom: 1px solid var(--panel-border);
+            height: var(--header-h);
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
             display: flex;
             align-items: center;
-            padding: 0 1.5rem;
-            box-shadow: var(--shadow-sm);
+            padding: 0 24px;
+            box-shadow: var(--shadow-md);
             z-index: 100;
+            flex-shrink: 0;
         }
-        .header-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            padding: 0.5rem 0;
+        .logo {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
         }
-        main {
-            flex-grow: 1;
-            overflow: hidden;
-            padding: 1rem;
-            height: calc(100vh - 50px);
+        .logo-sub {
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: rgba(255,255,255,0.7);
+            margin-left: 10px;
         }
-        /* Main Tab Navigation */
-        .main-tab-nav {
+        .tab-nav {
             display: flex;
-            border-bottom: 1px solid var(--panel-border);
+            margin-left: 40px;
+            gap: 4px;
         }
-        .main-tab-btn {
-            padding: 0.75rem 1.25rem;
-            font-size: 1rem;
+        .tab-btn {
+            padding: 8px 18px;
+            font-size: 0.85rem;
             font-weight: 500;
+            color: rgba(255,255,255,0.65);
+            background: transparent;
             border: none;
-            background: none;
+            border-radius: 8px 8px 0 0;
             cursor: pointer;
-            color: var(--text-muted);
-            border-bottom: 3px solid transparent;
-            transition: color 0.2s, border-color 0.2s;
+            transition: all 0.15s;
+            white-space: nowrap;
         }
-        .main-tab-btn.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
+        .tab-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        .tab-btn.active {
+            color: var(--primary-dark);
+            background: var(--bg);
+            font-weight: 600;
         }
-        .main-tab-content {
-            display: none;
-            height: 100%;
+
+        /* --- MAIN CONTENT --- */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px 24px;
         }
-        .main-tab-content.active {
-            display: block;
-        }
-        
-        /* Panel Styling */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* --- PANELS --- */
         .panel {
-            background-color: var(--panel-bg);
-            border: 1px solid var(--panel-border);
-            border-radius: var(--border-radius);
-            box-shadow: var(--shadow-sm);
-            display: flex;
-            flex-direction: column;
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
             overflow: hidden;
         }
         .panel-header {
-            padding: 0.75rem 1.25rem;
-            background-color: var(--panel-header-bg);
-            border-bottom: 1px solid var(--panel-border);
+            padding: 14px 20px;
             font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text);
+            border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .panel-title { font-size: 1.1rem; }
-        .panel-info { font-size: 0.875rem; font-weight: 400; color: var(--text-muted); }
-        .panel-controls {
-            padding: 0.5rem 1rem 0.75rem 1rem;
-            border-bottom: 1px solid var(--panel-border);
-        }
-        .panel-controls label {
+        .panel-info {
             font-size: 0.8rem;
-            font-weight: 500;
+            font-weight: 400;
             color: var(--text-muted);
-            margin-bottom: 0.25rem;
-            display: block;
         }
-        .panel-content {
-            padding: 0.5rem;
-            flex-grow: 1;
-            overflow: auto;
+        .panel-body {
+            padding: 8px;
             position: relative;
-        }
-        .plot-container, .plotly {
-            width: 100%;
-            height: 100%;
             min-height: 200px;
         }
-        .empty-state {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100%;
+        .panel-body-np { padding: 0; }
+        .panel-controls {
+            padding: 10px 20px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-controls label {
+            font-size: 0.78rem;
+            font-weight: 500;
             color: var(--text-muted);
-            font-style: italic;
+            margin-bottom: 4px;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .empty-state {
+            display: flex; justify-content: center; align-items: center;
+            height: 100%; min-height: 200px;
+            color: var(--text-muted); font-style: italic; font-size: 0.9rem;
         }
 
-        /* Tab 1: 4-Panel Layout */
-        #tab-1-content {
+        /* --- STAT CARDS --- */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 16px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            transition: transform 0.15s;
+        }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+            line-height: 1.1;
+        }
+        .stat-label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+            font-weight: 500;
+        }
+
+        /* --- DASHBOARD GRID --- */
+        .chart-row {
+            display: grid;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .chart-row-2 { grid-template-columns: 3fr 2fr; }
+        .chart-row-2r { grid-template-columns: 2fr 3fr; }
+        .chart-row-1 { grid-template-columns: 1fr; }
+
+        /* --- ONTOLOGY TAB --- */
+        .ontology-grid {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 16px;
+            height: calc(100vh - var(--header-h) - 40px);
+        }
+        .ontology-grid > .panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .ontology-grid > .panel > .panel-body,
+        .ontology-grid > .panel > .panel-body.panel-body-np {
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .ontology-details {
+            overflow-y: auto;
+            padding: 20px;
+            height: 100%;
+        }
+        .ontology-details h3 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        .ontology-details .cell-id {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            font-family: "SF Mono", "Fira Code", monospace;
+        }
+        .ontology-details h4 {
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-secondary);
+            margin: 18px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Marker evidence bars */
+        .marker-list { display: flex; flex-direction: column; gap: 6px; }
+        .marker-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+        }
+        .marker-name {
+            width: 80px;
+            font-weight: 500;
+            font-family: "SF Mono", "Fira Code", monospace;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+        .marker-bar-bg {
+            flex: 1;
+            height: 16px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .marker-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-light), var(--primary));
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .marker-badge {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--primary);
+            background: var(--primary-light);
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* Lineage breadcrumb path */
+        .lineage-path {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.82rem;
+        }
+        .lineage-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+            font-size: 0.78rem;
+        }
+        .lineage-chip:hover {
+            background: var(--primary-light);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .lineage-chip.self {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+            font-weight: 600;
+            cursor: default;
+        }
+        .lineage-arrow {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            flex-shrink: 0;
+        }
+        .lineage-id {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-family: "SF Mono", "Fira Code", monospace;
+        }
+
+        /* Tissue tags */
+        .tissue-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .tissue-tag {
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            background: #f1f5f9;
+            border-radius: 20px;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        /* --- EXPLORER TABS (Cell + Gene) --- */
+        .explorer-grid {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 16px;
+            height: calc(100vh - var(--header-h) - 40px);
+        }
+        .explorer-sidebar {
+            overflow: hidden;
+        }
+        .explorer-sidebar > .panel {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+        .explorer-sidebar > .panel > .panel-body,
+        .explorer-sidebar > .panel > .panel-body.panel-body-np {
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .explorer-sidebar #cell-details {
+            overflow-y: auto;
+            height: 100%;
+        }
+        .explorer-main {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        /* Gene explorer layout */
+        .gene-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .gene-charts {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            grid-template-rows: 50% 50%;
-            gap: 1rem;
-            height: 100%;
+            gap: 16px;
         }
-        
-        /* Tab 2: Cell Explorer Layout */
-        #tab-2-content {
+        .gene-search-bar {
             display: grid;
-            grid-template-columns: 350px 1fr;
-            gap: 1rem;
-            height: 100%;
+            grid-template-columns: 1fr auto;
+            gap: 16px;
+            align-items: end;
         }
-        
-        /* Tab 3: Feature Explorer Layout */
-        #tab-3-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: auto 50% 50%; /* Auto for search, 50/50 for charts */
-            gap: 1rem;
-            height: 100%;
+        .gene-stats {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            padding: 8px 0;
         }
-        #feature-search-panel {
-            grid-column: 1 / -1; /* Span full width */
-            height: auto;
-            padding: 1rem;
+        .gene-stat-chip {
+            background: var(--primary-light);
+            color: var(--primary);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.78rem;
         }
-        #feature-details-table-panel {
-            grid-column: 1 / -1; /* Span full width */
+
+        /* Source table */
+        .source-table { width: 100%; border-collapse: collapse; }
+        .source-table th, .source-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.82rem;
         }
-        
-        /* Tom Select Dropdown Styles */
+        .source-table th {
+            font-weight: 600;
+            background: #f8fafc;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            letter-spacing: 0.3px;
+            position: sticky;
+            top: 0;
+        }
+        .source-table tr:hover td { background: #f8fafc; }
+        .filter-row {
+            display: flex;
+            gap: 16px;
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .filter-row > div { flex: 1; }
+
+        /* Tom Select overrides */
         .ts-control {
-            border: 1px solid #ced4da !important;
-            border-radius: 0.375rem !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 8px !important;
+            font-size: 0.85rem !important;
         }
-        
-        /* Loading Overlay */
+
+        /* --- LOADING OVERLAY --- */
         #loading-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255, 255, 255, 0.9);
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            z-index: 10000; font-size: 1.25rem; font-weight: 500;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 10000;
             transition: opacity 0.3s ease-out;
         }
         .spinner {
-            width: 40px; height: 40px; border: 4px solid #dee2e6;
-            border-top-color: #007bff; border-radius: 50%;
-            animation: spin 1s linear infinite; margin-bottom: 1rem;
+            width: 40px; height: 40px;
+            border: 4px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Panel 3/4 List Styling */
-        .lineage-list { list-style: none; padding: 1rem; margin: 0; }
-        .lineage-list li { font-size: 0.95rem; padding: 0.25rem 0; }
-        .lineage-list li.lineage-item-0 { font-weight: 600; color: #007bff; }
-        .lineage-list li.lineage-item-1 { font-weight: 500; }
-        .lineage-list li em { font-size: 0.8rem; color: #6c757d; font-style: normal; }
-        
-        /* Accordion Style (Panel 4) */
-        .accordion-item { border-bottom: 1px solid #dee2e6; }
-        .accordion-item:last-child { border-bottom: none; }
-        .accordion-header {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 0.75rem 1rem; cursor: pointer;
-        }
-        .accordion-header:hover { background-color: #fcfcfc; }
-        .accordion-header span { font-weight: 600; font-size: 1rem; }
-        .accordion-arrow {
-            width: 1rem; height: 1rem; stroke: #6c757d;
-            transition: transform 0.2s ease-in-out; stroke-width: 3px;
-            flex-shrink: 0; margin-left: 1rem;
-        }
-        .accordion-body { max-height: 0; overflow: hidden; transition: max-height 0.2s ease-in-out; background-color: #fdfdfd; }
-        .accordion-body-content { padding: 0 1rem 1rem 2.5rem; }
-        .accordion-item.open .accordion-body { max-height: 500px; overflow-y: auto; }
-        .accordion-item.open .accordion-arrow { transform: rotate(90deg); }
-        
-        /* --- MAGIC (Problem 3): New badge style --- */
-        .feature-count-badge {
-            font-size: 0.75rem;
+        .loading-text {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
             font-weight: 500;
-            background-color: #e9ecef;
-            color: #495057;
-            padding: 0.2rem 0.5rem;
-            border-radius: 10rem;
-            margin-left: 0.5rem;
         }
-        /* --- END MAGIC --- */
 
-        .source-item { display: flex; font-size: 0.875rem; padding: 0.25rem 0; }
-        .source-db { font-weight: 500; color: #007bff; flex-basis: 100px; flex-shrink: 0; }
-        .source-type { font-style: italic; color: #6c757d; flex-basis: 100px; flex-shrink: 0; }
-        .source-info { color: #6c757d; flex-grow: 1; word-break: break-word; padding-left: 10px; }
-        
-        /* Search Result Table (Tab 3) */
-        .search-table { width: 100%; border-collapse: collapse; }
-        .search-table th, .search-table td {
-            padding: 0.5rem; text-align: left;
-            border-bottom: 1px solid #dee2e6;
-            font-size: 0.875rem;
-        }
-        .search-table th { font-weight: 600; background-color: #f1f3f5; }
+        /* Plotly responsive containers */
+        .plot-container { width: 100%; min-height: 300px; }
+        .plot-container-lg { width: 100%; min-height: 400px; }
+        .plot-container-xl { width: 100%; min-height: 500px; }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body>
 
     <div id="loading-overlay">
         <div class="spinner"></div>
-        Initializing SapiensOntoCellMap...
+        <div class="loading-text">Loading SapiensOntoCellMap Database Explorer...</div>
     </div>
 
     <header>
-        <h1 class="header-title">SapiensOntoCellMap</h1>
-        <nav class="main-tab-nav ml-6">
-            <button class="main-tab-btn active" data-tab="tab-1">Tissue Explorer</button>
-            <button class="main-tab-btn" data-tab="tab-2">Cell Explorer</button>
-            <button class="main-tab-btn" data-tab="tab-3">Feature Explorer</button>
+        <span class="logo">SapiensOntoCellMap</span>
+        <span class="logo-sub">Integrated Cell Marker Database Explorer</span>
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-dashboard">Dashboard</button>
+            <button class="tab-btn" data-tab="tab-ontology">Ontology Browser</button>
+            <button class="tab-btn" data-tab="tab-cell">Cell Explorer</button>
+            <button class="tab-btn" data-tab="tab-gene">Gene Explorer</button>
         </nav>
     </header>
 
     <main>
-        <div id="tab-1" class="main-tab-content active">
-            <div id="tab-1-content">
-                <div class="panel" id="panel-1">
-                    <div class="panel-header">
-                        <span class="panel-title">Panel 1: Tissue UMAP</span>
-                        <span class="panel-info" id="panel-1-info"></span>
-                    </div>
-                    <div class="panel-controls">
-                        <label for="select-tissue-highlight">Highlight Tissue:</label>
-                        <select id="select-tissue-highlight" placeholder="Search for a tissue..."></select>
-                    </div>
-                    <div class="panel-content">
-                        <div id="plot-tissue-umap" class="plot-container"></div>
-                    </div>
+        <!-- ============ TAB 1: DASHBOARD ============ -->
+        <div id="tab-dashboard" class="tab-content active">
+            <div class="stats-row">
+                <div class="stat-card"><div class="stat-value" id="sv-markers">--</div><div class="stat-label">Total Markers</div></div>
+                <div class="stat-card"><div class="stat-value" id="sv-genes">--</div><div class="stat-label">Unique Genes</div></div>
+                <div class="stat-card"><div class="stat-value" id="sv-cells">--</div><div class="stat-label">Cell Types</div></div>
+                <div class="stat-card"><div class="stat-value" id="sv-tissues">--</div><div class="stat-label">Tissues</div></div>
+                <div class="stat-card"><div class="stat-value" id="sv-dbs">--</div><div class="stat-label">Databases</div></div>
+            </div>
+
+            <div class="chart-row chart-row-2">
+                <div class="panel">
+                    <div class="panel-header">Database Contributions<span class="panel-info">Proportional marker entries per source database</span></div>
+                    <div class="panel-body"><div id="chart-treemap" class="plot-container"></div></div>
                 </div>
-                <div class="panel" id="panel-2">
-                    <div class="panel-header">
-                        <span class="panel-title">Panel 2: Cell UMAP</span>
-                        <span class="panel-info" id="panel-2-info"></span>
-                    </div>
-                    <div class="panel-controls">
-                        <label for="select-cell-highlight">Highlight Cell:</label>
-                        <select id="select-cell-highlight" placeholder="Select a cell..."></select>
-                    </div>
-                    <div class="panel-content">
-                        <div id="plot-cell-umap" class="plot-container">
-                            <div class="empty-state">Select a tissue in Panel 1.</div>
+                <div class="panel">
+                    <div class="panel-header">Evidence Types<span class="panel-info">Distribution of evidence categories</span></div>
+                    <div class="panel-body"><div id="chart-donut" class="plot-container"></div></div>
+                </div>
+            </div>
+
+            <div class="chart-row chart-row-2r">
+                <div class="panel">
+                    <div class="panel-header">Cross-Database Agreement<span class="panel-info" id="agr-info"></span></div>
+                    <div class="panel-body"><div id="chart-agreement" class="plot-container"></div></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">Tissue x Cell Type Coverage<span class="panel-info">Unique markers at intersection (top 20 tissues x 25 cell types)</span></div>
+                    <div class="panel-body"><div id="chart-coverage" class="plot-container-lg"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ TAB 2: ONTOLOGY BROWSER ============ -->
+        <div id="tab-ontology" class="tab-content">
+            <div class="ontology-grid">
+                <div class="panel">
+                    <div class="panel-header">Cell Ontology Hierarchy<span class="panel-info">Click a segment to explore. Inner ring = broad categories.</span></div>
+                    <div class="panel-body"><div id="chart-sunburst" class="plot-container-xl"></div></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">Cell Type Details<span class="panel-info" id="onto-detail-info"></span></div>
+                    <div class="panel-body panel-body-np">
+                        <div class="ontology-details" id="ontology-details">
+                            <div class="empty-state">Click a cell type in the sunburst to view its details.</div>
                         </div>
-                    </div>
-                </div>
-                <div class="panel" id="panel-3">
-                    <div class="panel-header">
-                        <span class="panel-title">Panel 3: Cell Ancestry</span>
-                        <span class="panel-info" id="panel-3-info"></span>
-                    </div>
-                    <div class="panel-content" id="panel-3-content">
-                        <div class="panel-tab-content active" id="panel-3-lineage">
-                            <div class="empty-state">Select a cell in Panel 2.</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="panel" id="panel-4">
-                    <div class="panel-header">
-                        <span class="panel-title">Panel 4: Cell Details</span>
-                        <span class="panel-info" id="panel-4-info"></span>
-                    </div>
-                    <div class="panel-content" id="panel-4-content">
-                        <div class="empty-state">Select a cell in Panel 2 or 3.</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div id="tab-2" class="main-tab-content">
-            <div id="tab-2-content">
-                <div class="panel">
-                    <div class="panel-header"><span class="panel-title">Cell Selection</span></div>
-                    <div class="panel-controls">
-                        <label for="select-cell-explorer">Select a Cell Type:</label>
-                        <select id="select-cell-explorer" placeholder="Search for a cell..."></select>
-                    </div>
-                    <div class="panel-content" id="cell-explorer-details">
-                         <div class="empty-state">Select a cell to see its details.</div>
+        <!-- ============ TAB 3: CELL EXPLORER ============ -->
+        <div id="tab-cell" class="tab-content">
+            <div class="explorer-grid">
+                <div class="explorer-sidebar">
+                    <div class="panel" style="height:100%;">
+                        <div class="panel-header">Cell Type Selection</div>
+                        <div class="panel-controls">
+                            <label for="select-cell">Search cell type</label>
+                            <select id="select-cell" placeholder="Type to search..."></select>
+                        </div>
+                        <div class="panel-body panel-body-np">
+                            <div class="ontology-details" id="cell-details">
+                                <div class="empty-state">Select a cell type to explore.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="panel">
-                    <div class="panel-header"><span class="panel-title">Marker Frequency by Tissue</span></div>
-                    <div class="panel-content" id="cell-explorer-upset">
-                        <div class="empty-state">Select a cell to compare markers.</div>
+                <div class="explorer-main">
+                    <div class="panel" style="flex:1;">
+                        <div class="panel-header">Marker Frequency by Tissue<span class="panel-info" id="cell-bar-info"></span></div>
+                        <div class="panel-body"><div id="chart-cell-tissue" class="plot-container-lg">
+                            <div class="empty-state">Select a cell type to see its tissue distribution.</div>
+                        </div></div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div id="tab-3" class="main-tab-content">
-            <div id="tab-3-content">
-                <div class="panel" id="feature-search-panel">
-                       <div class="panel-controls" style="border-bottom: none;">
-                            <label for="select-gene-explorer">Search for a Feature (Gene):</label>
-                            <select id="select-gene-explorer" placeholder="Search for a gene..."></select>
-                        </div>
-                </div>
+        <!-- ============ TAB 4: GENE EXPLORER ============ -->
+        <div id="tab-gene" class="tab-content">
+            <div class="gene-grid">
                 <div class="panel">
-                    <div class="panel-header"><span class="panel-title">Tissues Reporting Feature</span></div>
-                    <div class="panel-content" id="feature-plot-tissue">
-                        <div class="empty-state">Select a feature to see results.</div>
+                    <div class="panel-controls" style="border-bottom:none;">
+                        <label for="select-gene">Search gene / marker</label>
+                        <div class="gene-search-bar">
+                            <select id="select-gene" placeholder="Type a gene name..."></select>
+                        </div>
+                        <div class="gene-stats" id="gene-stats" style="display:none;"></div>
                     </div>
                 </div>
-                <div class="panel">
-                    <div class="panel-header"><span class="panel-title">Cell Types Reporting Feature</span></div>
-                    <div class="panel-content" id="feature-plot-cell">
-                        <div class="empty-state">Select a feature to see results.</div>
+
+                <div class="gene-charts">
+                    <div class="panel">
+                        <div class="panel-header">Tissues Reporting This Marker</div>
+                        <div class="panel-body"><div id="chart-gene-tissue" class="plot-container">
+                            <div class="empty-state">Select a gene to see results.</div>
+                        </div></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-header">Cell Types Reporting This Marker</div>
+                        <div class="panel-body"><div id="chart-gene-cell" class="plot-container">
+                            <div class="empty-state">Select a gene to see results.</div>
+                        </div></div>
                     </div>
                 </div>
-                <div class="panel" id="feature-details-table-panel" style="grid-column: 1 / -1;">
-                    <div class="panel-header"><span class="panel-title">Source Details</span></div>
-                    <div class="panel-controls" id="feature-table-controls" style="display: none; flex-direction: row; gap: 1rem; border-bottom: 1px solid var(--panel-border);">
+
+                <div class="panel" id="gene-source-panel" style="display:none;">
+                    <div class="panel-header">Source Details<span class="panel-info" id="gene-source-info"></span></div>
+                    <div class="filter-row" id="gene-filters" style="display:none;">
                         <div>
-                            <label for="select-filter-tissue">Filter by Tissue:</label>
-                            <select id="select-filter-tissue" placeholder="All tissues..."></select>
+                            <label for="filter-tissue">Filter by Tissue</label>
+                            <select id="filter-tissue" placeholder="All tissues..."></select>
                         </div>
                         <div>
-                            <label for="select-filter-cell">Filter by Cell Type:</label>
-                            <select id="select-filter-cell" placeholder="All cell types..."></select>
+                            <label for="filter-cell">Filter by Cell Type</label>
+                            <select id="filter-cell" placeholder="All cell types..."></select>
                         </div>
                     </div>
-                    <div class="panel-content" id="feature-details-table">
-                        <div class="empty-state">Select a feature to see results.</div>
+                    <div class="panel-body panel-body-np" style="max-height:300px; overflow-y:auto;">
+                        <div id="gene-source-table"></div>
                     </div>
                 </div>
             </div>
@@ -376,693 +610,638 @@
     </main>
 
     <script>
-        // Data placeholder. The Python script will replace the line below.
+        // =====================================================================
+        // DATA INJECTION — replaced by Python at build time
+        // =====================================================================
         const embeddedData = "%%__DATA_PLACEHOLDER__%%";
 
-        // Global state
-        let globalData = {};
-        let activeTissueId = null;
-        let activeCellId = null;
-        let tomSelects = {}; // Store Tom Select instances
-
-        // Plotly layout configuration
-        const PLOT_LAYOUT = {
-            margin: { l: 20, r: 20, b: 20, t: 20, pad: 5 },
-            autosize: true,
-            hovermode: 'closest',
-            xaxis: { visible: false, zeroline: false },
-            yaxis: { visible: false, zeroline: false },
-            legend: {
-                orientation: 'h',
-                yanchor: 'bottom',
-                y: -0.1,
-                xanchor: 'center',
-                x: 0.5
-            },
-            uirevision: 'true',
-            hoverlabel: {
-                bgcolor: '#ffffff',
-                font: { size: 13, family: 'var(--font-family)' },
-                bordercolor: 'var(--panel-border)'
-            }
+        // =====================================================================
+        // GLOBALS
+        // =====================================================================
+        let DATA = {};
+        let tomSelects = {};
+        const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
+        const CHART_COLORS = {
+            primary: '#2563eb',
+            primaryLight: '#93c5fd',
+            secondary: '#059669',
+            palette: ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#6b7280',
+                       '#ec4899','#14b8a6','#f97316','#6366f1','#84cc16','#a855f7',
+                       '#06b6d4','#e11d48'],
         };
 
-        /**
-         * Main initialization function.
-         */
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
         document.addEventListener('DOMContentLoaded', () => {
             try {
-                if (typeof embeddedData === 'string' && embeddedData.startsWith("%%__")) {
-                    console.error("Data embedding failed. Placeholder not replaced.");
-                    showLoadingError("Data embedding failed. Please re-run the Python script.");
+                if (typeof embeddedData === 'string' && embeddedData.startsWith('%%__')) {
+                    showError('Data embedding failed. Please re-run the Python generator.');
                     return;
                 }
-                globalData = embeddedData;
-                console.log("Global data loaded:", globalData);
-                initComponents();
-            } catch (error) {
-                console.error("Failed to parse embedded data:", error);
-                showLoadingError("Failed to parse data. The HTML file might be corrupt.");
+                DATA = embeddedData;
+                initApp();
+            } catch (e) {
+                console.error('Init failed:', e);
+                showError('Failed to parse embedded data: ' + e.message);
             }
         });
 
-        /**
-         * Populates all components, plots, and dropdowns.
-         */
-        function initComponents() {
-            try {
-                // --- Tab 1 Init ---
-                plotTissueUmap();
-                const tissueOptions = globalData.all_tissues_list.map(t => ({ value: t.tissue_id, text: t.tissue_name }));
-                tomSelects['select-tissue-highlight'] = new TomSelect('#select-tissue-highlight', { options: tissueOptions, placeholder: 'Search for a tissue...' });
-                tomSelects['select-cell-highlight'] = new TomSelect('#select-cell-highlight', { options: [], placeholder: 'Select a tissue first...' });
-                
-                // --- Tab 2 Init ---
-                const cellOptions = globalData.all_cells_list.map(c => ({ value: c.cell_id, text: `${c.cell_name} (${c.cell_id})` }));
-                tomSelects['select-cell-explorer'] = new TomSelect('#select-cell-explorer', { options: cellOptions, placeholder: 'Search for a cell...' });
-                
-                // --- Tab 3 Init ---
-                const geneOptions = globalData.all_genes_list.map(g => ({ value: g, text: g }));
-                tomSelects['select-gene-explorer'] = new TomSelect('#select-gene-explorer', { options: geneOptions, placeholder: 'Search for a gene...' });
-                
-                // --- MAGIC (Point 3): Init filter dropdowns ---
-                tomSelects['select-filter-tissue'] = new TomSelect('#select-filter-tissue', { options: [], placeholder: 'All tissues...', allowEmptyOption: true });
-                tomSelects['select-filter-cell'] = new TomSelect('#select-filter-cell', { options: [], placeholder: 'All cell types...', allowEmptyOption: true });
+        function initApp() {
+            // Tab navigation
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+            });
 
+            // Dashboard
+            initDashboard();
 
-                // --- Event Listeners ---
-                // Main Tabs
-                document.querySelectorAll('.main-tab-btn').forEach(btn => {
-                    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-                });
-                
-                // Panel 1 Dropdown
-                tomSelects['select-tissue-highlight'].on('change', (value) => {
-                    if (value) {
-                        onTissueClick(value);
-                    } else {
-                        activeTissueId = null;
-                        plotTissueUmap(); // Re-plots with default colors
-                        resetPanel('plot-cell-umap', 'Select a tissue in Panel 1.', 'panel-2-info');
-                        resetPanel('panel-3-lineage', 'Select a cell in Panel 2.', 'panel-3-info');
-                        resetPanel('panel-4-content', 'Select a cell in Panel 2 or 3.', 'panel-4-info');
-                        tomSelects['select-cell-highlight'].clearOptions();
-                        tomSelects['select-cell-highlight'].clear();
-                        tomSelects['select-cell-highlight'].setPlaceholder('Select a tissue first...');
-                    }
-                });
-                
-                // Panel 2 Dropdown
-                 tomSelects['select-cell-highlight'].on('change', (value) => {
-                    if (value) {
-                        onCellClick(value);
-                    }
-                });
-                
-                // Tab 2 Dropdown
-                tomSelects['select-cell-explorer'].on('change', onCellExplorerSelect);
+            // Ontology (deferred until tab shown for performance)
+            let ontologyInited = false;
 
-                // Tab 3 Dropdown
-                tomSelects['select-gene-explorer'].on('change', onFeatureExplorerSelect);
+            // Cell Explorer dropdown
+            const cellOpts = DATA.all_cells_list.map(c =>
+                ({ value: c.cell_id, text: c.cell_name + ' (' + c.cell_id + ')' }));
+            tomSelects['select-cell'] = new TomSelect('#select-cell',
+                { options: cellOpts, placeholder: 'Type to search...' });
+            tomSelects['select-cell'].on('change', onCellSelect);
 
-                // --- MAGIC (Point 3): Add listeners for new filter dropdowns ---
-                const debouncedFilter = debounce(() => {
-                    const gene = tomSelects['select-gene-explorer'].getValue();
-                    if(gene) renderFeatureTable(globalData.gene_to_summary[gene]);
-                }, 200);
-                
-                tomSelects['select-filter-tissue'].on('change', debouncedFilter);
-                tomSelects['select-filter-cell'].on('change', debouncedFilter);
-                
-                // Panel 3 Tabs (Dendrogram removed)
-                document.querySelectorAll('#panel-3 .panel-tab-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                         // This is just a stub now in case you re-add tabs
-                        document.querySelectorAll('#panel-3 .panel-tab-btn').forEach(b => b.classList.remove('active'));
-                        e.currentTarget.classList.add('active');
-                    });
-                });
+            // Gene Explorer dropdown
+            const geneOpts = DATA.all_genes_list.map(g => ({ value: g, text: g }));
+            tomSelects['select-gene'] = new TomSelect('#select-gene',
+                { options: geneOpts, placeholder: 'Type a gene name...' });
+            tomSelects['select-gene'].on('change', onGeneSelect);
 
-                // --- 🚨 THE FIX 🚨 ---
-                // Hide the loading overlay *before* loading the default gene,
-                // which is a slow operation. This stops the app from "hanging".
-                hideLoadingOverlay();
-                // --- 🚨 END FIX 🚨 ---
+            // Gene filter dropdowns
+            tomSelects['filter-tissue'] = new TomSelect('#filter-tissue',
+                { options: [], placeholder: 'All tissues...', allowEmptyOption: true });
+            tomSelects['filter-cell'] = new TomSelect('#filter-cell',
+                { options: [], placeholder: 'All cell types...', allowEmptyOption: true });
+            const debouncedGeneFilter = debounce(() => {
+                const gene = tomSelects['select-gene'].getValue();
+                if (gene && DATA.gene_to_summary[gene])
+                    renderGeneSourceTable(DATA.gene_to_summary[gene]);
+            }, 200);
+            tomSelects['filter-tissue'].on('change', debouncedGeneFilter);
+            tomSelects['filter-cell'].on('change', debouncedGeneFilter);
 
-
-                // --- MAGIC (Point 2): "Default Value" ---
-                // Pre-load a default gene to show immediate value on Tab 3
-                const defaultGene = 'PMEL'; // A good marker example
-                if (globalData.all_genes_list.includes(defaultGene)) {
-                   switchTab('tab-3'); // Go to Feature Explorer
-                   tomSelects['select-gene-explorer'].setValue(defaultGene); // This triggers the 'change' event
-                } else {
-                   console.warn(`Default gene ${defaultGene} not found in data.`);
+            // Override tab switch to lazy-init ontology
+            const origSwitch = switchTab;
+            switchTab = function(tabId) {
+                origSwitch(tabId);
+                if (tabId === 'tab-ontology' && !ontologyInited) {
+                    ontologyInited = true;
+                    setTimeout(initOntology, 50);
                 }
-                // --- END MAGIC ---
-                
-                // -- This line was moved up --
-                // hideLoadingOverlay(); 
-                
-            } catch (error) {
-                console.error("Error during component initialization:", error);
-                showLoadingError(`Initialization Error: ${error.message}`);
-            }
-        }
-        
-        // ===================================
-        // === TAB 1: TISSUE EXPLORER ========
-        // ===================================
-
-        function plotTissueUmap() {
-            const plotDiv = 'plot-tissue-umap';
-            if (!globalData.tissues_umap || globalData.tissues_umap.length === 0) {
-                document.getElementById(plotDiv).innerHTML = '<div class="empty-state">No tissue data found.</div>';
-                return;
-            }
-
-            const trace = {
-                x: globalData.tissues_umap.map(t => t.umap_x),
-                y: globalData.tissues_umap.map(t => t.umap_y),
-                text: globalData.tissues_umap.map(t => t.tissue_name),
-                customdata: globalData.tissues_umap.map(t => t.tissue_id),
-                mode: 'markers',
-                type: 'scatter',
-                marker: {
-                    size: 8,
-                    opacity: 0.8,
-                    // ** FIX: Must be an array for restyling to work **
-                    color: globalData.tissues_umap.map(() => "var(--primary-color)") 
-                },
-                hovertemplate: '<b>%{text}</b><br>Cells: %{customdata[1]}<br>Features: %{customdata[2]}<extra></extra>',
-                customdata: globalData.tissues_umap.map(t => [t.tissue_id, t.cell_count || 0, t.feature_count || 0])
             };
 
-            Plotly.newPlot(plotDiv, [trace], {...PLOT_LAYOUT, showlegend: false}, { responsive: true, displayModeBar: false });
-            
-            document.getElementById('panel-1-info').textContent = `${globalData.tissues_umap.length} Tissues`;
-
-            document.getElementById(plotDiv).on('plotly_click', (data) => {
-                if (data.points.length > 0) {
-                    const tissueId = data.points[0].customdata[0];
-                    onTissueClick(tissueId);
-                }
-            });
+            hideLoading();
         }
 
-        function onTissueClick(tissueId) {
-            activeTissueId = tissueId;
-            const tissue = globalData.tissues_umap.find(t => t.tissue_id === tissueId);
-            if (!tissue) return;
-
-            // ** FIX: Sync dropdown with click **
-            tomSelects['select-tissue-highlight'].setValue(tissueId, true); // true = silent
-            
-            // ** FIX: Highlight selected point, grey out others **
-            const colors = globalData.tissues_umap.map(t => t.tissue_id === tissueId ? 'var(--highlight-color)' : 'var(--muted-color)');
-            const opacities = globalData.tissues_umap.map(t => t.tissue_id === tissueId ? 1.0 : 0.3);
-            const sizes = globalData.tissues_umap.map(t => t.tissue_id === tissueId ? 12 : 8);
-
-            Plotly.restyle('plot-tissue-umap', {
-                'marker.color': [colors],
-                'marker.opacity': [opacities],
-                'marker.size': [sizes]
-            });
-
-            // Update Panel 2 (Cell UMAP)
-            plotCellUmap(tissue);
-            
-            // Populate Panel 2 Dropdown
-            const cellList = (tissue.cells || []).map(c => ({ value: c.cell_id, text: c.cell_name })).sort((a, b) => a.text.localeCompare(b.text));
-            tomSelects['select-cell-highlight'].clearOptions();
-            tomSelects['select-cell-highlight'].clear();
-            tomSelects['select-cell-highlight'].addOptions(cellList);
-            tomSelects['select-cell-highlight'].setPlaceholder('Select a cell...');
-            
-            // Clear Panel 3 and 4
-            resetPanel('panel-3-lineage', 'Select a cell in Panel 2.', 'panel-3-info');
-            resetPanel('panel-4-content', 'Select a cell in Panel 2 or 3.', 'panel-4-info');
+        // =====================================================================
+        // TAB MANAGEMENT
+        // =====================================================================
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            document.querySelector('.tab-btn[data-tab="' + tabId + '"]').classList.add('active');
+            window.dispatchEvent(new Event('resize'));
         }
 
-        function plotCellUmap(tissue) {
-            const plotDiv = 'plot-cell-umap';
-            const cells = tissue.cells || [];
-            if (cells.length === 0) {
-                resetPanel(plotDiv, 'No cells found for this tissue.', 'panel-2-info');
-                document.getElementById('panel-2-info').textContent = `${tissue.tissue_name} (0 Cells)`;
+        // =====================================================================
+        // DASHBOARD
+        // =====================================================================
+        function initDashboard() {
+            const s = DATA.stats;
+            document.getElementById('sv-markers').textContent = fmtNum(s.total_markers);
+            document.getElementById('sv-genes').textContent = fmtNum(s.unique_genes);
+            document.getElementById('sv-cells').textContent = fmtNum(s.unique_cell_types);
+            document.getElementById('sv-tissues').textContent = fmtNum(s.unique_tissues);
+            document.getElementById('sv-dbs').textContent = s.num_databases;
+
+            plotTreemap();
+            plotDonut();
+            plotAgreement();
+            plotCoverage();
+        }
+
+        function plotTreemap() {
+            const db = DATA.db_contribution;
+            Plotly.newPlot('chart-treemap', [{
+                type: 'treemap',
+                labels: db.map(d => d.name),
+                parents: db.map(() => ''),
+                values: db.map(d => d.count),
+                text: db.map(d =>
+                    fmtNum(d.count) + ' markers | ' +
+                    fmtNum(d.genes) + ' genes | ' +
+                    d.cells + ' cell types'),
+                textinfo: 'label+percent parent',
+                hovertemplate: '<b>%{label}</b><br>%{text}<br>%{percentParent:.1%} of total<extra></extra>',
+                marker: {
+                    colors: db.map((_, i) => CHART_COLORS.palette[i % CHART_COLORS.palette.length]),
+                    line: { width: 2, color: '#ffffff' }
+                },
+                pathbar: { visible: false },
+            }], {
+                margin: { l: 8, r: 8, t: 8, b: 8 },
+            }, PLOTLY_CONFIG);
+        }
+
+        function plotDonut() {
+            const src = DATA.source_types;
+            const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#6b7280'];
+            Plotly.newPlot('chart-donut', [{
+                type: 'pie',
+                labels: src.map(d => d.name),
+                values: src.map(d => d.count),
+                hole: 0.55,
+                marker: { colors: colors, line: { color: '#fff', width: 2 } },
+                textinfo: 'label+percent',
+                textposition: 'outside',
+                textfont: { size: 11 },
+                hovertemplate: '<b>%{label}</b><br>%{value:,} entries (%{percent})<extra></extra>',
+                pull: src.map((_, i) => i === 0 ? 0.03 : 0),
+            }], {
+                margin: { l: 10, r: 10, t: 10, b: 10 },
+                showlegend: false,
+                annotations: [{
+                    text: fmtNum(DATA.stats.total_markers) + '<br><span style="font-size:11px;color:#94a3b8">entries</span>',
+                    showarrow: false,
+                    font: { size: 18, color: '#1e293b', family: 'var(--font)' }
+                }]
+            }, PLOTLY_CONFIG);
+        }
+
+        function plotAgreement() {
+            const a = DATA.cross_db_agreement;
+            document.getElementById('agr-info').textContent =
+                a.multi_db_pct + '% of gene-cell pairs supported by 2+ databases';
+
+            const colors = a.labels.map((l, i) =>
+                parseInt(l) === 1 ? '#cbd5e1' : CHART_COLORS.primary);
+
+            Plotly.newPlot('chart-agreement', [{
+                type: 'bar',
+                x: a.labels.map(l => l + (parseInt(l) === 1 ? ' database' : ' databases')),
+                y: a.values,
+                marker: { color: colors, line: { color: '#fff', width: 1 } },
+                text: a.values.map(v => fmtNum(v)),
+                textposition: 'outside',
+                textfont: { size: 10 },
+                hovertemplate: '%{x}<br>%{y:,} gene-cell pairs<extra></extra>',
+            }], {
+                margin: { l: 60, r: 20, t: 20, b: 60 },
+                plot_bgcolor: '#fff', paper_bgcolor: '#fff',
+                xaxis: { title: { text: 'Number of Supporting Databases', standoff: 10 },
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+                yaxis: { title: 'Gene-Cell Pairs',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+            }, PLOTLY_CONFIG);
+        }
+
+        function plotCoverage() {
+            const cm = DATA.coverage_matrix;
+            if (!cm.tissues || cm.tissues.length === 0) {
+                document.getElementById('chart-coverage').innerHTML =
+                    '<div class="empty-state">No coverage data available.</div>';
                 return;
             }
 
-            const cellsByCluster = cells.reduce((acc, cell) => {
-                const cluster = cell.cluster_id || 'Unknown';
-                if (!acc[cluster]) {
-                    acc[cluster] = {
-                        x: [], y: [], text: [], customdata: [],
-                        name: (cell.cell_name || cluster).substring(0, 30),
-                        type: 'scatter',
-                        mode: 'markers',
-                        marker: { size: 6, opacity: 0.8 },
-                        hovertemplate: '<b>%{text}</b> (%{customdata})<extra></extra>'
-                    };
-                }
-                acc[cluster].x.push(cell.umap_x);
-                acc[cluster].y.push(cell.umap_y);
-                acc[cluster].text.push(cell.cell_name);
-                acc[cluster].customdata.push(cell.cell_id);
-                return acc;
-            }, {});
+            // Apply log1p transform for better visual range
+            const zLog = cm.values.map(row => row.map(v => Math.log2(v + 1)));
 
-            const traces = Object.values(cellsByCluster);
-            Plotly.newPlot(plotDiv, traces, PLOT_LAYOUT, { responsive: true, displayModeBar: false });
-            
-            document.getElementById('panel-2-info').textContent = `${tissue.tissue_name} (${cells.length} Cells)`;
+            Plotly.newPlot('chart-coverage', [{
+                type: 'heatmap',
+                z: zLog,
+                x: cm.cell_types,
+                y: cm.tissues,
+                colorscale: [
+                    [0, '#f8fafc'], [0.2, '#dbeafe'], [0.4, '#93c5fd'],
+                    [0.6, '#3b82f6'], [0.8, '#1e40af'], [1, '#1e3a5f']
+                ],
+                hovertemplate: '<b>%{y}</b> x <b>%{x}</b><br>Unique markers: %{customdata}<extra></extra>',
+                customdata: cm.values,
+                colorbar: {
+                    title: { text: 'log2(markers+1)', side: 'right', font: { size: 11 } },
+                    thickness: 12,
+                    len: 0.6,
+                },
+                xgap: 1, ygap: 1,
+            }], {
+                margin: { l: 140, r: 60, t: 10, b: 100 },
+                xaxis: { tickangle: -45, tickfont: { size: 10 }, side: 'bottom' },
+                yaxis: { tickfont: { size: 10 }, autorange: 'reversed' },
+            }, PLOTLY_CONFIG);
+        }
 
-            document.getElementById(plotDiv).on('plotly_click', (data) => {
+        // =====================================================================
+        // ONTOLOGY BROWSER
+        // =====================================================================
+        function initOntology() {
+            const sb = DATA.sunburst;
+            if (!sb.ids || sb.ids.length === 0) {
+                document.getElementById('chart-sunburst').innerHTML =
+                    '<div class="empty-state">No ontology data available.</div>';
+                return;
+            }
+
+            // Color by marker count (log scale for visual contrast)
+            const maxVal = Math.max(...sb.values.filter(v => v > 0), 1);
+            const colorValues = sb.values.map(v =>
+                v > 0 ? Math.log2(v + 1) / Math.log2(maxVal + 1) : 0);
+
+            const colorScale = [
+                [0, '#f0f4ff'], [0.15, '#dbeafe'], [0.3, '#93c5fd'],
+                [0.5, '#60a5fa'], [0.7, '#3b82f6'], [0.85, '#2563eb'], [1, '#1e40af']
+            ];
+
+            Plotly.newPlot('chart-sunburst', [{
+                type: 'sunburst',
+                ids: sb.ids,
+                labels: sb.labels,
+                parents: sb.parents,
+                values: sb.values,
+                branchvalues: 'remainder',
+                marker: {
+                    colors: colorValues,
+                    colorscale: colorScale,
+                    line: { width: 1, color: '#ffffff' },
+                    showscale: true,
+                    colorbar: {
+                        title: { text: 'Marker density', side: 'right', font: { size: 10 } },
+                        thickness: 10, len: 0.4, y: 0.8,
+                    },
+                },
+                hovertemplate: '<b>%{label}</b><br>%{id}<br>Unique markers: %{value}<extra></extra>',
+                maxdepth: 4,
+                insidetextorientation: 'radial',
+                textfont: { size: 10 },
+            }], {
+                margin: { l: 10, r: 10, t: 10, b: 10 },
+            }, PLOTLY_CONFIG);
+
+            document.getElementById('chart-sunburst').on('plotly_click', data => {
                 if (data.points.length > 0) {
-                    const cellId = data.points[0].customdata;
-                    onCellClick(cellId);
+                    showOntologyDetails(data.points[0].id);
                 }
             });
         }
 
-        function onCellClick(cellId) {
-            if (!cellId) return;
-            activeCellId = cellId;
-            
-            const tissue = globalData.tissues_umap.find(t => t.tissue_id === activeTissueId);
-            if (!tissue) return;
+        function showOntologyDetails(cellId) {
+            const panel = document.getElementById('ontology-details');
+            const cellData = DATA.all_cells_list.find(c => c.cell_id === cellId);
+            const cellName = cellData ? cellData.cell_name : cellId;
+            const markers = DATA.cell_markers[cellId] || [];
+            const lineage = DATA.cell_lineage_map[cellId];
+            const tissues = DATA.cell_tissue_summary[cellId] || [];
 
-            // ** FIX for Panel 4: Get cell data from the correct place **
-            const cell = tissue.cells.find(c => c.cell_id === cellId);
-            // *** BUGFIX from last time (cellName was wrong) ***
-            const cellName = cell ? cell.cell_name : (globalData.all_cells_list.find(c => c.cell_id === cellId)?.cell_name || cellId);
+            document.getElementById('onto-detail-info').textContent =
+                markers.length + ' markers in database';
 
-            // Sync Panel 2 Dropdown
-            tomSelects['select-cell-highlight'].setValue(cellId, true); // silent
-            
-            // ** HIERARCHY FIX: This will now work **
-            renderCellLineage(cellId, cellName);
+            let html = '<h3>' + escHtml(cellName) + '</h3>';
+            html += '<p class="cell-id">' + cellId + '</p>';
 
-            // Update Panel 4 (Cell Details)
-            if (cell) {
-                renderCellDetails(cell); // <-- MAGIC (Problem 3) is inside this function
-                // Highlight point in Panel 2
-                const newMarkers = (document.getElementById('plot-cell-umap').data || []).map(trace => {
-                    const newMarker = { ...trace.marker };
-                    newMarker.opacity = trace.customdata.map(d => d === cellId ? 1.0 : 0.4);
-                    newMarker.size = trace.customdata.map(d => d === cellId ? 10 : 6);
-                    newMarker.line = { 
-                        width: trace.customdata.map(d => d === cellId ? 2 : 0),
-                        color: 'black'
-                    };
-                    return newMarker;
+            // Top Markers with evidence bars
+            if (markers.length > 0) {
+                html += '<h4>Top Markers (by database support)</h4>';
+                html += '<div class="marker-list">';
+                const maxDb = Math.max(...markers.map(m => m.db_count));
+                markers.forEach(m => {
+                    const pct = Math.max(10, (m.db_count / maxDb) * 100);
+                    html += '<div class="marker-item">' +
+                        '<span class="marker-name">' + escHtml(m.gene) + '</span>' +
+                        '<span class="marker-bar-bg"><span class="marker-bar" style="width:' + pct + '%"></span></span>' +
+                        '<span class="marker-badge">' + m.db_count + ' DB' + (m.db_count > 1 ? 's' : '') + '</span>' +
+                        '</div>';
                 });
-                Plotly.restyle('plot-cell-umap', { 
-                    'marker.opacity': newMarkers.map(m => m.opacity),
-                    'marker.size': newMarkers.map(m => m.size),
-                    'marker.line': newMarkers.map(m => m.line)
-                });
-
+                html += '</div>';
             } else {
-                resetPanel('panel-4-content', `This is a parent node. Select a cell from the UMAP to see details.`, 'panel-4-info');
-                document.getElementById('panel-4-info').textContent = `${cellName}`;
-            }
-        }
-
-        function renderCellLineage(cellId, cellName) {
-            const panel = document.getElementById('panel-3-lineage');
-            const info = document.getElementById('panel-3-info');
-            
-            const lineageData = globalData.cell_lineage_map[cellId];
-            
-            if (!lineageData) {
-                panel.innerHTML = `<div class="empty-state">No lineage information found for ${cellName} (${cellId}).</div>`;
-                info.textContent = `${cellName}`;
-                return;
+                html += '<p style="color:var(--text-muted); font-size:0.85rem; margin-top:12px;">No markers found for this cell type in the database.</p>';
             }
 
-            const ancestors = Object.entries(lineageData).map(([id, data]) => ({
-                id,
-                dist: data.dist,
-                name: data.name
-            }));
-            
-            ancestors.sort((a, b) => b.dist - a.dist);
-            
-            let html = '<ul class="lineage-list">';
-            let maxDist = ancestors.length > 0 ? ancestors[0].dist : 0;
-            
-            ancestors.forEach((ancestor, index) => {
-                let indent = (maxDist - ancestor.dist) * 15;
-                let itemClass = `lineage-item-${ancestor.dist}`;
-                
-                html += `<li class="${itemClass}" style="padding-left: ${indent}px;">`;
-                html += `<span>${ancestor.name} <em>(${ancestor.id})</em></span>`;
-                html += `</li>`;
-            });
-            html += '</ul>';
+            // Lineage (breadcrumb path — clickable nodes navigate sunburst)
+            if (lineage) {
+                html += '<h4>Ontology Lineage</h4>';
+                const ancestors = Object.entries(lineage)
+                    .map(([id, d]) => ({ id, ...d }))
+                    .sort((a, b) => b.dist - a.dist);
+                html += '<div class="lineage-path">';
+                ancestors.forEach((a, i) => {
+                    if (i > 0) html += '<span class="lineage-arrow">&#9654;</span>';
+                    const isSelf = a.dist === 0;
+                    html += '<span class="lineage-chip' + (isSelf ? ' self' : '') +
+                        '" data-cell-id="' + a.id + '" title="' + a.id + '">' +
+                        escHtml(a.name) + '</span>';
+                });
+                html += '</div>';
+            }
+
+            // Tissues
+            if (tissues.length > 0) {
+                html += '<h4>Found in Tissues (' + tissues.length + ')</h4>';
+                html += '<div class="tissue-tags">';
+                tissues.slice(0, 15).forEach(t => {
+                    html += '<span class="tissue-tag">' + escHtml(t.name) +
+                        ' <b>' + t.count + '</b></span>';
+                });
+                if (tissues.length > 15) {
+                    html += '<span class="tissue-tag">+' + (tissues.length - 15) + ' more</span>';
+                }
+                html += '</div>';
+            }
 
             panel.innerHTML = html;
-            info.textContent = `${cellName}`;
-        }
-        
-        // Dendrogram logic removed
-        
-        function renderCellDetails(cell) {
-            const panel = document.getElementById('panel-4-content');
-            const info = document.getElementById('panel-4-info');
-            
-            info.textContent = `${cell.cell_name} (${cell.cell_id})`;
 
-            const features = cell.features || [];
-            if (features.length === 0) {
-                resetPanel('panel-4-content', 'No features listed for this cell.', 'panel-4-info');
-                info.textContent = `${cell.cell_name} (${cell.cell_id})`;
+            // Attach click handlers for lineage chips (navigate sunburst)
+            panel.querySelectorAll('.lineage-chip:not(.self)').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const targetId = chip.getAttribute('data-cell-id');
+                    showOntologyDetails(targetId);
+                });
+            });
+        }
+
+        // =====================================================================
+        // CELL EXPLORER
+        // =====================================================================
+        function onCellSelect(cellId) {
+            if (!cellId) {
+                document.getElementById('cell-details').innerHTML =
+                    '<div class="empty-state">Select a cell type to explore.</div>';
+                document.getElementById('chart-cell-tissue').innerHTML =
+                    '<div class="empty-state">Select a cell type to see its tissue distribution.</div>';
                 return;
             }
-            
-            let html = '<div class="accordion-list">';
-            
-            // --- MAGIC (Problem 3): Sort by frequency (source count) descending ---
-            features.sort((a, b) => b.sources.length - a.sources.length);
-            
-            features.forEach((feature, index) => {
-                const itemId = `feature-${cell.cell_id}-${index}`;
-                
-                // --- MAGIC (Problem 3): Add frequency badge ---
-                html += `<div class="accordion-item" id="${itemId}">
-                    <div class="accordion-header" onclick="toggleAccordion('${itemId}')">
-                        <span>${feature.name}</span>
-                        <span class="feature-count-badge">${feature.sources.length} Sources</span>
-                        <svg class="accordion-arrow" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </div>
-                    <div class="accordion-body">
-                        <div class="accordion-body-content">`;
-                
-                if (feature.sources && feature.sources.length > 0) {
-                    feature.sources.forEach(source => {
-                        html += `<div class="source-item">
-                            <span class="source-db">${source.database || 'N/A'}</span>
-                            <span class="source-type">${source.source_type || 'N/A'}</span>
-                            <span class="source-info">${source.source_info || 'N/A'}</span>
-                        </div>`;
-                    });
-                } else {
-                     html += `<div class="source-item"><span class="source-info">No source information.</span></div>`;
-                }
 
-                html += `</div></div></div>`;
-            });
+            // Reuse ontology details renderer for the sidebar
+            showCellExplorerDetails(cellId);
+
+            // Bar chart
+            const tissues = DATA.cell_tissue_summary[cellId] || [];
+            if (tissues.length === 0) {
+                document.getElementById('chart-cell-tissue').innerHTML =
+                    '<div class="empty-state">No tissue data for this cell type.</div>';
+                document.getElementById('cell-bar-info').textContent = '';
+                return;
+            }
+
+            document.getElementById('cell-bar-info').textContent =
+                tissues.length + ' tissues';
+
+            const sorted = [...tissues].reverse(); // Plotly h-bar shows bottom-up
+            Plotly.newPlot('chart-cell-tissue', [{
+                type: 'bar',
+                orientation: 'h',
+                x: sorted.map(t => t.count),
+                y: sorted.map(t => t.name),
+                marker: {
+                    color: CHART_COLORS.primary,
+                    line: { color: '#fff', width: 1 }
+                },
+                text: sorted.map(t => t.count),
+                textposition: 'outside',
+                textfont: { size: 10 },
+                hovertemplate: '<b>%{y}</b><br>%{x} unique markers<extra></extra>',
+            }], {
+                margin: { l: 180, r: 40, t: 10, b: 40 },
+                plot_bgcolor: '#fff', paper_bgcolor: '#fff',
+                xaxis: { title: 'Unique Markers', visible: true,
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+                yaxis: { automargin: true, visible: true, type: 'category',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+            }, PLOTLY_CONFIG);
+        }
+
+        function showCellExplorerDetails(cellId) {
+            const panel = document.getElementById('cell-details');
+            const cellData = DATA.all_cells_list.find(c => c.cell_id === cellId);
+            const cellName = cellData ? cellData.cell_name : cellId;
+            const markers = DATA.cell_markers[cellId] || [];
+            const lineage = DATA.cell_lineage_map[cellId];
+
+            let html = '<div style="padding:16px;">';
+            html += '<h3 style="font-size:1.1rem; font-weight:600; margin-bottom:2px;">' +
+                escHtml(cellName) + '</h3>';
+            html += '<p class="cell-id">' + cellId + '</p>';
+
+            // Top markers
+            if (markers.length > 0) {
+                html += '<h4 style="font-size:0.82rem; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-secondary); margin:14px 0 8px; padding-bottom:4px; border-bottom:1px solid var(--border);">Top Markers</h4>';
+                html += '<div class="marker-list">';
+                const maxDb = Math.max(...markers.map(m => m.db_count));
+                markers.slice(0, 15).forEach(m => {
+                    const pct = Math.max(10, (m.db_count / maxDb) * 100);
+                    html += '<div class="marker-item">' +
+                        '<span class="marker-name">' + escHtml(m.gene) + '</span>' +
+                        '<span class="marker-bar-bg"><span class="marker-bar" style="width:' + pct + '%"></span></span>' +
+                        '<span class="marker-badge">' + m.db_count + ' DB' + (m.db_count > 1 ? 's' : '') + '</span>' +
+                        '</div>';
+                });
+                html += '</div>';
+            }
+
+            // Lineage (breadcrumb path)
+            if (lineage) {
+                html += '<h4 style="font-size:0.82rem; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-secondary); margin:14px 0 8px; padding-bottom:4px; border-bottom:1px solid var(--border);">Lineage</h4>';
+                const ancestors = Object.entries(lineage)
+                    .map(([id, d]) => ({ id, ...d }))
+                    .sort((a, b) => b.dist - a.dist);
+                html += '<div class="lineage-path">';
+                ancestors.forEach((a, i) => {
+                    if (i > 0) html += '<span class="lineage-arrow">&#9654;</span>';
+                    const isSelf = a.dist === 0;
+                    html += '<span class="lineage-chip' + (isSelf ? ' self' : '') +
+                        '" title="' + a.id + '">' + escHtml(a.name) + '</span>';
+                });
+                html += '</div>';
+            }
+
             html += '</div>';
             panel.innerHTML = html;
         }
 
-        // ===================================
-        // === TAB 2: CELL EXPLORER ==========
-        // ===================================
+        // =====================================================================
+        // GENE EXPLORER
+        // =====================================================================
+        function onGeneSelect(gene) {
+            const tissueDiv = document.getElementById('chart-gene-tissue');
+            const cellDiv = document.getElementById('chart-gene-cell');
+            const sourcePanel = document.getElementById('gene-source-panel');
+            const statsDiv = document.getElementById('gene-stats');
+            const filters = document.getElementById('gene-filters');
 
-        function onCellExplorerSelect(cellId) {
-            const detailsPanel = document.getElementById('cell-explorer-details');
-            const plotPanel = document.getElementById('cell-explorer-upset'); // This is our bar plot panel
-            
-            if (!cellId) {
-                resetPanel('cell-explorer-details', 'Select a cell to see its details.');
-                resetPanel('cell-explorer-upset', 'Select a cell to compare markers.');
-                return;
-            }
-
-            const cellData = globalData.all_cells_list.find(c => c.cell_id === cellId);
-            const cellName = cellData ? cellData.cell_name : cellId;
-
-            const summary = globalData.cell_to_tissue_summary[cellId];
-
-            if (!summary) {
-                resetPanel('cell-explorer-details', `No data found for ${cellName} (${cellId}).`);
-                resetPanel('cell-explorer-upset', `No data found for ${cellName} (${cellId}).`);
-                return;
-            }
-
-            // --- 1. Render Details Panel (Lineage ONLY) ---
-            const lineageData = globalData.cell_lineage_map[cellId];
-            let detailsHtml = `<h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">${cellName} (${cellId})</h3>`;
-            
-            detailsHtml += `<h4 style="font-weight: 600; color: var(--text-color); margin-top: 1rem; margin-bottom: 0.5rem;">Lineage:</h4>`;
-            if (lineageData) {
-                const ancestors = Object.entries(lineageData).map(([id, data]) => ({...data, id}));
-                ancestors.sort((a, b) => b.dist - a.dist);
-                detailsHtml += '<ul class="lineage-list" style="padding: 0;">'; // Use existing styles
-                const maxDist = ancestors.length > 0 ? ancestors[0].dist : 0;
-                ancestors.forEach(a => {
-                    let indent = (maxDist - a.dist) * 15;
-                    detailsHtml += `<li class="lineage-item-${a.dist}" style="padding-left: ${indent}px;">
-                        <span>${a.name} <em>(${a.id})</em></span>
-                    </li>`;
-                });
-                detailsHtml += '</ul>';
-            } else {
-                detailsHtml += `<p style="font-size: 0.9rem; color: var(--text-muted); font-style: italic;">No lineage data available.</p>`;
-            }
-            detailsPanel.innerHTML = detailsHtml;
-
-            // --- 2. Render Bar Plot ---
-            plotTissueMarkerBarChart(summary, plotPanel);
-        }
-
-        /**
-         * Renders a horizontal bar chart of marker frequency per tissue.
-         */
-        function plotTissueMarkerBarChart(summary, panel) {
-            // Sort tissues by marker count, descending
-            const tissues = Object.values(summary).sort((a, b) => b.markers.length - a.markers.length);
-
-            const barTrace = {
-                x: tissues.map(t => t.markers.length),
-                y: tissues.map(t => t.tissue_name),
-                type: 'bar',
-                orientation: 'h',
-                marker: { color: 'var(--primary-color)' },
-                hovertemplate: '<b>%{y}</b><br>%{x} markers<extra></extra>'
-            };
-
-            const barLayout = {
-                ...PLOT_LAYOUT, // Use the existing global layout
-                margin: { l: 200, r: 30, t: 30, b: 50 }, // Give more left margin for labels
-                yaxis: { 
-                    automargin: true, 
-                    autorange: 'reversed', // Show highest on top
-                    visible: true // Ensure Y-axis is visible
-                },
-                xaxis: { 
-                    title: 'Number of Markers',
-                    visible: true // Ensure X-axis is visible
-                }
-            };
-
-            Plotly.newPlot(panel, [barTrace], barLayout, { responsive: true, displayModeBar: false });
-        }
-
-
-        // ===================================
-        // === TAB 3: FEATURE EXPLORER =======
-        // ===================================
-
-        function onFeatureExplorerSelect(gene) {
-            const plotTissue = document.getElementById('feature-plot-tissue');
-            const plotCell = document.getElementById('feature-plot-cell');
-            const detailsTable = document.getElementById('feature-details-table');
-            const filterControls = document.getElementById('feature-table-controls');
-            
             if (!gene) {
-                resetPanel('feature-plot-tissue', 'Select a feature to see results.');
-                resetPanel('feature-plot-cell', 'Select a feature to see results.');
-                resetPanel('feature-details-table', 'Select a feature to see results.');
-                // --- MAGIC (Point 3): Hide filters
-                filterControls.style.display = 'none';
-                tomSelects['select-filter-tissue'].clearOptions(); tomSelects['select-filter-tissue'].clear();
-                tomSelects['select-filter-cell'].clearOptions(); tomSelects['select-filter-cell'].clear();
+                tissueDiv.innerHTML = '<div class="empty-state">Select a gene to see results.</div>';
+                cellDiv.innerHTML = '<div class="empty-state">Select a gene to see results.</div>';
+                sourcePanel.style.display = 'none';
+                statsDiv.style.display = 'none';
                 return;
             }
 
-            const data = globalData.gene_to_summary[gene];
+            const data = DATA.gene_to_summary[gene];
             if (!data) {
-                resetPanel('feature-plot-tissue', `No data found for gene: ${gene}`);
-                resetPanel('feature-plot-cell', `No data found for gene: ${gene}`);
-                resetPanel('feature-details-table', `No data found for gene: ${gene}`);
-                // --- MAGIC (Point 3): Hide filters
-                filterControls.style.display = 'none';
-                tomSelects['select-filter-tissue'].clearOptions(); tomSelects['select-filter-tissue'].clear();
-                tomSelects['select-filter-cell'].clearOptions(); tomSelects['select-filter-cell'].clear();
+                tissueDiv.innerHTML = '<div class="empty-state">No data for gene: ' + escHtml(gene) + '</div>';
+                cellDiv.innerHTML = '<div class="empty-state">No data for gene: ' + escHtml(gene) + '</div>';
+                sourcePanel.style.display = 'none';
+                statsDiv.style.display = 'none';
                 return;
             }
-            
-            // --- 1. Plot Tissue Bar Chart (Problem 1) ---
-            const tissueData = data.tissue_plot.reverse(); 
-            const tissueTrace = {
-                y: tissueData.map(d => d.name),
-                x: tissueData.map(d => d.mentions), // <-- MAGIC (Problem 1): Use 'mentions' for frequency
-                customdata: tissueData.map(d => d.source_count), 
+
+            // Stats chips
+            statsDiv.style.display = 'flex';
+            statsDiv.innerHTML =
+                '<span class="gene-stat-chip">' + data.total_tissues + ' tissues</span>' +
+                '<span class="gene-stat-chip">' + data.total_cells + ' cell types</span>' +
+                '<span class="gene-stat-chip">' + data.total_databases + ' databases</span>';
+
+            // Tissue bar chart (only available for multi-DB genes)
+            if (!data.tissue_plot || data.tissue_plot.length === 0) {
+                tissueDiv.innerHTML = '<div class="empty-state">Single-database gene. Try a gene with broader support.</div>';
+                cellDiv.innerHTML = '<div class="empty-state">Single-database gene. Try a gene with broader support.</div>';
+                sourcePanel.style.display = 'none';
+                filters.style.display = 'none';
+                return;
+            }
+            const tp = [...data.tissue_plot].reverse();
+            Plotly.newPlot('chart-gene-tissue', [{
                 type: 'bar',
                 orientation: 'h',
-                marker: { color: 'var(--primary-color)' },
-                hovertemplate: '<b>%{y}</b><br>Total Mentions: %{x}<br>Source Databases: %{customdata}<extra></extra>' // <-- MAGIC (Problem 1)
-            };
-            
-            Plotly.newPlot(plotTissue, [tissueTrace], 
-                {...PLOT_LAYOUT, margin: {l: 200, r: 20, b: 30, t: 20}, yaxis: {automargin: true, visible: true, type: 'category'}, xaxis: {title: 'Total Mentions (Frequency)', visible: true}}, // <-- MAGIC (Problem 1)
-                { responsive: true, displayModeBar: false }
-            );
-            
-            // --- 2. Plot Cell Bar Chart (Problem 1) ---
-            const cellData = data.cell_plot.reverse();
-            const cellTrace = {
-                y: cellData.map(d => d.name),
-                x: cellData.map(d => d.mentions), // <-- MAGIC (Problem 1): Use 'mentions' for frequency
-                customdata: cellData.map(d => d.source_count),
+                y: tp.map(d => d.tissue_name),
+                x: tp.map(d => d.source_count),
+                customdata: tp.map(d => d.mentions),
+                marker: { color: CHART_COLORS.primary, line: { color: '#fff', width: 1 } },
+                text: tp.map(d => d.source_count),
+                textposition: 'outside',
+                textfont: { size: 10 },
+                hovertemplate: '<b>%{y}</b><br>Sources: %{x}<br>Mentions: %{customdata}<extra></extra>',
+            }], {
+                margin: { l: 180, r: 50, t: 10, b: 40 },
+                plot_bgcolor: '#fff', paper_bgcolor: '#fff',
+                xaxis: { title: 'Source Databases',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+                yaxis: { automargin: true, type: 'category',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+            }, PLOTLY_CONFIG);
+
+            // Cell bar chart
+            const cp = [...data.cell_plot].reverse();
+            Plotly.newPlot('chart-gene-cell', [{
                 type: 'bar',
                 orientation: 'h',
-                marker: { color: 'var(--primary-color)' },
-                hovertemplate: '<b>%{y}</b><br>Total Mentions: %{x}<br>Source Databases: %{customdata}<extra></extra>' // <-- MAGIC (Problem 1)
-            };
+                y: cp.map(d => d.cell_name),
+                x: cp.map(d => d.source_count),
+                customdata: cp.map(d => d.mentions),
+                marker: { color: CHART_COLORS.secondary, line: { color: '#fff', width: 1 } },
+                text: cp.map(d => d.source_count),
+                textposition: 'outside',
+                textfont: { size: 10 },
+                hovertemplate: '<b>%{y}</b><br>Sources: %{x}<br>Mentions: %{customdata}<extra></extra>',
+            }], {
+                margin: { l: 180, r: 50, t: 10, b: 40 },
+                plot_bgcolor: '#fff', paper_bgcolor: '#fff',
+                xaxis: { title: 'Source Databases',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+                yaxis: { automargin: true, type: 'category',
+                         showgrid: false, showline: true, linecolor: '#333', linewidth: 1 },
+            }, PLOTLY_CONFIG);
 
-            Plotly.newPlot(plotCell, [cellTrace], 
-                {...PLOT_LAYOUT, margin: {l: 200, r: 20, b: 30, t: 20}, yaxis: {automargin: true, visible: true, type: 'category'}, xaxis: {title: 'Total Mentions (Frequency)', visible: true}}, // <-- MAGIC (Problem 1)
-                { responsive: true, displayModeBar: false }
-            );
+            // Source details table (only for genes with source data)
+            if (data.sources && data.sources.length > 0) {
+                sourcePanel.style.display = 'block';
+                filters.style.display = 'flex';
+                document.getElementById('gene-source-info').textContent =
+                    data.sources.length + ' source entries';
 
-            // --- 3. Render Details Table (Point 3) ---
-            // --- MAGIC (Point 3): Populate dropdowns and show controls ---
-            const allTissues = [...new Set(data.sources.map(s => s.tissue_name))].map(t => ({value: t, text: t})).sort((a,b) => a.text.localeCompare(b.text));
-            const allCells = [...new Set(data.sources.map(s => s.cell_name))].map(c => ({value: c, text: c})).sort((a,b) => a.text.localeCompare(b.text));
-            
-            tomSelects['select-filter-tissue'].clearOptions(); tomSelects['select-filter-tissue'].clear();
-            tomSelects['select-filter-tissue'].addOptions(allTissues);
-            
-            tomSelects['select-filter-cell'].clearOptions(); tomSelects['select-filter-cell'].clear();
-            tomSelects['select-filter-cell'].addOptions(allCells);
-            
-            filterControls.style.display = 'flex';
-            
-            // Initial render of the table
-            renderFeatureTable(data);
-        }
+                // Populate filter dropdowns
+                const tOpts = [...new Set(data.sources.map(s => s.tissue_name))]
+                    .sort().map(t => ({ value: t, text: t }));
+                const cOpts = [...new Set(data.sources.map(s => s.cell_name))]
+                    .sort().map(c => ({ value: c, text: c }));
+                tomSelects['filter-tissue'].clearOptions();
+                tomSelects['filter-tissue'].clear();
+                tomSelects['filter-tissue'].addOptions(tOpts);
+                tomSelects['filter-cell'].clearOptions();
+                tomSelects['filter-cell'].clear();
+                tomSelects['filter-cell'].addOptions(cOpts);
 
-        /**
-         * --- MAGIC (Point 3): New function to render the filterable table ---
-         * Renders the source details table based on current dropdown filters.
-         */
-        function renderFeatureTable(data) {
-            const detailsTable = document.getElementById('feature-details-table');
-            if (!data) {
-                resetPanel('feature-details-table', 'Select a feature to see results.');
-                return;
-            }
-
-            const tissueFilter = tomSelects['select-filter-tissue'].getValue();
-            const cellFilter = tomSelects['select-filter-cell'].getValue();
-
-            let filteredSources = data.sources;
-
-            if (tissueFilter) {
-                filteredSources = filteredSources.filter(s => s.tissue_name === tissueFilter);
-            }
-            if (cellFilter) {
-                filteredSources = filteredSources.filter(s => s.cell_name === cellFilter);
-            }
-            
-            if (filteredSources.length === 0) {
-                 detailsTable.innerHTML = `<div class="empty-state">No source details match your filter.</div>`;
-                 return;
-            }
-
-            let html = `<table class="search-table">
-                <thead>
-                    <tr><th>Tissue</th><th>Cell</th><th>Database</th><th>Source Type</th><th>Source Info</th></tr>
-                </thead>
-                <tbody>`;
-            
-            filteredSources.forEach(s => {
-                html += `<tr>
-                    <td>${s.tissue_name || 'N/A'}</td>
-                    <td>${s.cell_name || 'N/A'}</td>
-                    <td>${s.database || 'N/A'}</td>
-                    <td>${s.source_type || 'N/A'}</td>
-                    <td>${s.source_info || 'N/A'}</td>
-                </tr>`;
-            });
-
-            html += `</tbody></table>`;
-            detailsTable.innerHTML = html;
-        }
-
-
-        /* --- Helper Functions --- */
-        
-        function switchTab(tabId) {
-            document.querySelectorAll('.main-tab-content').forEach(tab => tab.classList.remove('active'));
-            document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            document.querySelector(`.main-tab-btn[data-tab='${tabId}']`).classList.add('active');
-            window.dispatchEvent(new Event('resize'));
-        }
-
-        function populateDropdown(selectId, items, placeholder) {
-            const select = document.getElementById(selectId);
-            const isTomSelect = select.tomselect;
-            
-            if (isTomSelect) {
-                select.tomselect.clearOptions();
-                select.tomselect.addOptions(items);
-                select.tomselect.setPlaceholder(placeholder);
+                renderGeneSourceTable(data);
             } else {
-                select.innerHTML = `<option value="">${placeholder}</option>`; // Clear existing
-                items.forEach(item => {
-                    const option = document.createElement('option');
-                    option.value = (typeof item === 'object') ? item.value : item;
-                    option.textContent = (typeof item === 'object') ? item.text : item;
-                    select.appendChild(option);
-                });
-            }
-        }
-        
-        function resetPanel(panelId, message, infoId) {
-            document.getElementById(panelId).innerHTML = `<div class="empty-state">${message}</div>`;
-            if (infoId) {
-                document.getElementById(infoId).textContent = '';
-            }
-        }
-        
-        function toggleAccordion(itemId) {
-            const item = document.getElementById(itemId);
-            if (item) {
-                item.classList.toggle('open');
+                sourcePanel.style.display = 'none';
+                filters.style.display = 'none';
             }
         }
 
-        function hideLoadingOverlay() {
-            document.getElementById('loading-overlay').style.opacity = '0';
-            setTimeout(() => {
-                document.getElementById('loading-overlay').style.display = 'none';
-            }, 300);
+        function renderGeneSourceTable(data) {
+            const div = document.getElementById('gene-source-table');
+            if (!data || !data.sources) {
+                div.innerHTML = '<div class="empty-state">No source details available for this gene.</div>';
+                return;
+            }
+
+            let filtered = data.sources;
+            const tFilter = tomSelects['filter-tissue'].getValue();
+            const cFilter = tomSelects['filter-cell'].getValue();
+            if (tFilter) filtered = filtered.filter(s => s.tissue_name === tFilter);
+            if (cFilter) filtered = filtered.filter(s => s.cell_name === cFilter);
+
+            if (filtered.length === 0) {
+                div.innerHTML = '<div class="empty-state">No entries match your filters.</div>';
+                return;
+            }
+
+            let html = '<table class="source-table"><thead><tr>' +
+                '<th>Tissue</th><th>Cell Type</th><th>Database</th><th>Evidence Type</th>' +
+                '</tr></thead><tbody>';
+            filtered.forEach(s => {
+                html += '<tr>' +
+                    '<td>' + escHtml(s.tissue_name) + '</td>' +
+                    '<td>' + escHtml(s.cell_name) + '</td>' +
+                    '<td>' + escHtml(s.database) + '</td>' +
+                    '<td>' + escHtml(s.source_type) + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table>';
+            div.innerHTML = html;
         }
 
-        function showLoadingError(message) {
-            const overlay = document.getElementById('loading-overlay');
-            overlay.innerHTML = `<div style="color: #dc3545; text-align: center; padding: 2rem;">
-                <strong>Error</strong><br><br>${message}
-            </div>`;
-            overlay.style.opacity = '1';
-            overlay.style.display = 'flex';
+        // =====================================================================
+        // UTILITIES
+        // =====================================================================
+        function fmtNum(n) {
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return n.toLocaleString();
         }
-        
-        function debounce(func, delay) {
-            let timeout;
+
+        function escHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        function debounce(fn, delay) {
+            let t;
             return function(...args) {
-                const context = this;
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(context, args), delay);
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(this, args), delay);
             };
         }
 
+        function hideLoading() {
+            const el = document.getElementById('loading-overlay');
+            el.style.opacity = '0';
+            setTimeout(() => { el.style.display = 'none'; }, 300);
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('loading-overlay');
+            el.innerHTML = '<div style="color:#dc2626; text-align:center; padding:2rem; max-width:500px;">' +
+                '<strong style="font-size:1.1rem;">Error</strong><br><br>' + msg + '</div>';
+            el.style.opacity = '1';
+        }
     </script>
 </body>
 </html>
