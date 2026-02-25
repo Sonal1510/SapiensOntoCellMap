@@ -451,10 +451,12 @@
             font-weight: 500;
         }
 
-        /* Plotly responsive containers */
-        .plot-container { width: 100%; min-height: 300px; }
-        .plot-container-lg { width: 100%; min-height: 400px; }
-        .plot-container-xl { width: 100%; min-height: 500px; }
+        /* Plotly responsive containers — NOTE: do NOT use 'plot-container' as a class name;
+           Plotly.js injects <div class="plot-container plotly"> internally, so our CSS would
+           override Plotly's internal height calculations causing charts to not render. */
+        .chart-box { width: 100%; min-height: 300px; }
+        .chart-box-lg { width: 100%; min-height: 400px; }
+        .chart-box-xl { width: 100%; min-height: 500px; }
 
         /* Scrollbar styling */
         ::-webkit-scrollbar { width: 6px; }
@@ -495,22 +497,22 @@
             <div class="chart-row chart-row-2">
                 <div class="panel">
                     <div class="panel-header">Database Contributions<span class="panel-info">Proportional marker entries per source database</span></div>
-                    <div class="panel-body"><div id="chart-treemap" class="plot-container"></div></div>
+                    <div class="panel-body"><div id="chart-treemap" class="chart-box"></div></div>
                 </div>
                 <div class="panel">
                     <div class="panel-header">Evidence Types<span class="panel-info">Distribution of evidence categories</span></div>
-                    <div class="panel-body"><div id="chart-donut" class="plot-container"></div></div>
+                    <div class="panel-body"><div id="chart-donut" class="chart-box"></div></div>
                 </div>
             </div>
 
             <div class="chart-row chart-row-2r">
                 <div class="panel">
                     <div class="panel-header">Cross-Database Agreement<span class="panel-info" id="agr-info"></span></div>
-                    <div class="panel-body"><div id="chart-agreement" class="plot-container"></div></div>
+                    <div class="panel-body"><div id="chart-agreement" class="chart-box"></div></div>
                 </div>
                 <div class="panel">
                     <div class="panel-header">Tissue x Cell Type Coverage<span class="panel-info">Unique markers at intersection (top 20 tissues x 25 cell types)</span></div>
-                    <div class="panel-body"><div id="chart-coverage" class="plot-container-lg"></div></div>
+                    <div class="panel-body"><div id="chart-coverage" class="chart-box-lg"></div></div>
                 </div>
             </div>
         </div>
@@ -520,7 +522,7 @@
             <div class="ontology-grid">
                 <div class="panel">
                     <div class="panel-header">Cell Ontology Hierarchy<span class="panel-info">Click a segment to explore. Inner ring = broad categories.</span></div>
-                    <div class="panel-body"><div id="chart-sunburst" class="plot-container-xl"></div></div>
+                    <div class="panel-body"><div id="chart-sunburst" class="chart-box-xl"></div></div>
                 </div>
                 <div class="panel">
                     <div class="panel-header">Cell Type Details<span class="panel-info" id="onto-detail-info"></span></div>
@@ -553,7 +555,7 @@
                 <div class="explorer-main">
                     <div class="panel" style="flex:1;">
                         <div class="panel-header">Marker Frequency by Tissue<span class="panel-info" id="cell-bar-info"></span></div>
-                        <div class="panel-body"><div id="chart-cell-tissue" class="plot-container-lg">
+                        <div class="panel-body"><div id="chart-cell-tissue" class="chart-box-lg">
                             <div class="empty-state">Select a cell type to see its tissue distribution.</div>
                         </div></div>
                     </div>
@@ -577,13 +579,13 @@
                 <div class="gene-charts">
                     <div class="panel">
                         <div class="panel-header">Tissues Reporting This Marker</div>
-                        <div class="panel-body"><div id="chart-gene-tissue" class="plot-container">
+                        <div class="panel-body"><div id="chart-gene-tissue" class="chart-box">
                             <div class="empty-state">Select a gene to see results.</div>
                         </div></div>
                     </div>
                     <div class="panel">
                         <div class="panel-header">Cell Types Reporting This Marker</div>
-                        <div class="panel-body"><div id="chart-gene-cell" class="plot-container">
+                        <div class="panel-body"><div id="chart-gene-cell" class="chart-box">
                             <div class="empty-state">Select a gene to see results.</div>
                         </div></div>
                     </div>
@@ -1074,7 +1076,7 @@
 
             if (!gene) {
                 tissueDiv.innerHTML = '<div class="empty-state">Select a gene to see results.</div>';
-                cellDiv.innerHTML = '<div class="empty-state">Select a gene to see results.</div>';
+                cellDiv.innerHTML = '';
                 sourcePanel.style.display = 'none';
                 statsDiv.style.display = 'none';
                 return;
@@ -1082,8 +1084,8 @@
 
             const data = DATA.gene_to_summary[gene];
             if (!data) {
-                tissueDiv.innerHTML = '<div class="empty-state">No data for gene: ' + escHtml(gene) + '</div>';
-                cellDiv.innerHTML = '<div class="empty-state">No data for gene: ' + escHtml(gene) + '</div>';
+                tissueDiv.innerHTML = '<div class="empty-state">No data found for: ' + escHtml(gene) + '</div>';
+                cellDiv.innerHTML = '';
                 sourcePanel.style.display = 'none';
                 statsDiv.style.display = 'none';
                 return;
@@ -1098,12 +1100,20 @@
 
             // Tissue bar chart (only available for multi-DB genes)
             if (!data.tissue_plot || data.tissue_plot.length === 0) {
-                tissueDiv.innerHTML = '<div class="empty-state">Single-database gene. Try a gene with broader support.</div>';
-                cellDiv.innerHTML = '<div class="empty-state">Single-database gene. Try a gene with broader support.</div>';
+                const singleMsg = '<div class="empty-state" style="padding:20px;">' +
+                    '<strong>' + escHtml(gene) + '</strong> — found in 1 database<br>' +
+                    '<span style="font-size:0.85rem;">Comparative bar charts require 2+ databases. ' +
+                    'This gene appears in ' + data.total_tissues + ' tissue(s) and ' +
+                    data.total_cells + ' cell type(s).</span></div>';
+                tissueDiv.innerHTML = singleMsg;
+                cellDiv.innerHTML = '<div class="empty-state">Comparative chart unavailable for single-database genes.</div>';
                 sourcePanel.style.display = 'none';
                 filters.style.display = 'none';
                 return;
             }
+            // Clear containers before Plotly render to avoid stale content stacking
+            tissueDiv.innerHTML = '';
+            cellDiv.innerHTML = '';
             const tp = [...data.tissue_plot].reverse();
             Plotly.newPlot('chart-gene-tissue', [{
                 type: 'bar',

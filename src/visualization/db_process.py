@@ -137,8 +137,11 @@ class SapiensMapGenerator:
         df['source_type'] = df['source_type'].fillna('N/A').astype(str)
         df['source_info'] = df['source_info'].fillna('N/A').astype(str)
 
-        # Global gene list
+        # Global gene list — filter out non-gene entries (dates, multi-word strings, empty)
+        # Date strings from source DBs (e.g. "2019-09-02 00:00:00") contain spaces;
+        # valid gene symbols do not.
         all_genes_set = set(df['gene'].unique()) - {'Unknown Gene'}
+        all_genes_set = {g for g in all_genes_set if g and ' ' not in g and len(g) <= 60}
         self.all_genes = sorted(list(all_genes_set))
 
         # Global tissue list
