@@ -67,19 +67,13 @@ PROJECT_DIR = os.path.dirname(BENCH_DIR)
 RESULTS_DIR = os.path.join(BENCH_DIR, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Config paths
+# Config paths — load from project config (HGNC path also used by get_cluster_annotation.py default)
 sys.path.insert(0, PROJECT_DIR)
-sys.path.insert(0, os.path.join(PROJECT_DIR, "config"))
 try:
-    from config.config import (
-        PROCESSED_COMBINED_DATABASE_FILE,
-        HGNC_COMPLETE_SET_FILE,
-    )
+    from config.config import PROCESSED_COMBINED_DATABASE_FILE
     MARKER_DB = PROCESSED_COMBINED_DATABASE_FILE
-    HGNC_FILE = HGNC_COMPLETE_SET_FILE
 except ImportError:
     MARKER_DB = os.path.join(PROJECT_DIR, "data", "processed_combined_db", "master_cell_marker_db.csv")
-    HGNC_FILE = os.path.join(PROJECT_DIR, "data", "reference", "hgnc_complete_set.txt")
 
 ANNOTATION_SCRIPT = os.path.join(
     PROJECT_DIR, "src", "cluster_annotation", "get_cluster_annotation.py"
@@ -301,9 +295,8 @@ def run_sapiensontocellmap(deg_csv: str, output_dir: str,
         "--log2fc", "0.25",   # lower threshold for PBMC (small panel)
         "--pval", "0.05",
         "--min_overlap", "2",
+        # --hgnc_map omitted: get_cluster_annotation.py defaults to config.HGNC_COMPLETE_SET_FILE
     ]
-    if HGNC_FILE and os.path.exists(HGNC_FILE):
-        cmd += ["--hgnc_map", HGNC_FILE]
     if tissue:
         cmd += ["--tissue", tissue]
 

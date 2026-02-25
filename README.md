@@ -96,13 +96,19 @@ The test prints a validation summary with row counts, ontology coverage, and per
 ### scRNA-seq annotation
 
 ```bash
+# Minimal — marker_db and hgnc_map default to paths in config/config.py
 python3 src/cluster_annotation/get_cluster_annotation.py \
     /path/to/cluster_markers.csv  SAMPLE_NAME  /path/to/output_dir \
     --deg_type scrna \
-    --deg_format seurat \
+    --tissue skin
+
+# Full — explicit paths (required when running from a different working directory)
+python3 src/cluster_annotation/get_cluster_annotation.py \
+    /path/to/cluster_markers.csv  SAMPLE_NAME  /path/to/output_dir \
+    --deg_type scrna \
     --marker_db data/processed_combined_db/master_cell_marker_db.csv \
-    --tissue skin \
-    --hgnc_map data/reference/hgnc_complete_set.txt
+    --hgnc_map data/reference/hgnc_complete_set.txt \
+    --tissue skin
 ```
 
 **Supported DEG formats** (auto-detected or forced with `--deg_format`):
@@ -116,9 +122,7 @@ python3 src/cluster_annotation/get_cluster_annotation.py \
 python3 src/cluster_annotation/get_cluster_annotation.py \
     /path/to/spaceranger_outs/  SAMPLE_NAME  /path/to/output_dir \
     --deg_type spatial \
-    --marker_db data/processed_combined_db/master_cell_marker_db.csv \
-    --tissue skin \
-    --hgnc_map data/reference/hgnc_complete_set.txt
+    --tissue skin
 ```
 
 The UMAP and cluster assignments are auto-detected from the Space Ranger output directory.
@@ -129,18 +133,20 @@ The UMAP and cluster assignments are auto-detected from the Space Ranger output 
 |----------|---------|-------------|
 | `--deg_type` | required | `scrna` or `spatial` |
 | `--deg_format` | auto | `seurat`, `scanpy`, or `generic` |
-| `--marker_db` | required | Path to `master_cell_marker_db.csv` |
+| `--marker_db` | config path¹ | Path to `master_cell_marker_db.csv` |
+| `--hgnc_map` | config path¹ | HGNC complete set file for gene alias resolution |
 | `--tissue` | None | Tissue name substring for marker DB filter (e.g. `skin`) |
 | `--pval` | 0.05 | Adjusted p-value threshold |
 | `--log2fc` | 1.0 | log2 fold-change threshold |
 | `--min_overlap` | 2 | Minimum gene overlap to report |
 | `--background_gene_count` | auto | Override hypergeometric N (see §N for scRNA-seq) |
-| `--hgnc_map` | None | HGNC complete set file for gene alias resolution |
 | `--no_hierarchy` | — | Skip CL ontology hierarchical annotation |
 | `--umap_csv` | None | scRNA-seq UMAP coordinates CSV (Barcode, UMAP-1, UMAP-2) |
 | `--cell_cluster_csv` | None | scRNA-seq cluster assignments CSV (Barcode, Cluster) |
 | `--no_deconvolution` | — | Disable the Cell Type Composition tab in the HTML report |
 | `--no_auto_spatial_filter` | — | Disable auto-calibration of mean_counts threshold |
+
+¹ Defaults to the path in `config/config.py` (`PROCESSED_COMBINED_DATABASE_FILE` and `HGNC_COMPLETE_SET_FILE`). These are set automatically after running `python3 test/test_classes.py`.
 
 ---
 
@@ -249,12 +255,10 @@ Outputs: `benchmarking/results/benchmark_summary.txt`, per-cluster CSV, and 3 pu
 ### 3. Annotate a sample (end-to-end test)
 
 ```bash
-# scRNA-seq (Seurat FindAllMarkers CSV)
+# scRNA-seq — marker_db and hgnc_map auto-resolved from config/config.py
 python3 src/cluster_annotation/get_cluster_annotation.py \
     /path/to/cluster_markers.csv  MY_SAMPLE  /path/to/output/ \
     --deg_type scrna \
-    --marker_db data/processed_combined_db/master_cell_marker_db.csv \
-    --hgnc_map data/reference/hgnc_complete_set.txt \
     --tissue skin \
     --background_gene_count 20000
 
@@ -262,8 +266,6 @@ python3 src/cluster_annotation/get_cluster_annotation.py \
 python3 src/cluster_annotation/get_cluster_annotation.py \
     /path/to/spaceranger_outs/  MY_SAMPLE  /path/to/output/ \
     --deg_type spatial \
-    --marker_db data/processed_combined_db/master_cell_marker_db.csv \
-    --hgnc_map data/reference/hgnc_complete_set.txt \
     --tissue skin
 ```
 

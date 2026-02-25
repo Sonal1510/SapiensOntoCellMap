@@ -12,6 +12,7 @@ Annotate each cluster with cell types using:
 """
 
 import os
+import sys
 import logging
 import argparse
 import pandas as pd
@@ -27,6 +28,19 @@ from hierarchical_annotation import HierarchicalAnnotator
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# --- Load path defaults from config (project root two levels up from this file) ---
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+try:
+    from config.config import (
+        PROCESSED_COMBINED_DATABASE_FILE as _DEFAULT_MARKER_DB,
+        HGNC_COMPLETE_SET_FILE as _DEFAULT_HGNC_MAP,
+    )
+except ImportError:
+    _DEFAULT_MARKER_DB = None
+    _DEFAULT_HGNC_MAP = None
 
 # Source-type quality weights for cross-database agreement scoring
 SOURCE_TYPE_WEIGHTS = {
@@ -759,11 +773,16 @@ def main():
     parser.add_argument("--log2fc", type=float, default=1.0, help="Log2FC threshold")
     parser.add_argument("--mean", type=float, default=0.0, help="Mean count threshold")
     parser.add_argument("--topgenes", type=int, default=None, help="Top N genes")
-    parser.add_argument("--marker_db", required=True, help="Path to marker DB CSV")
+    parser.add_argument("--marker_db", type=str, default=_DEFAULT_MARKER_DB,
+        required=(_DEFAULT_MARKER_DB is None),
+        help="Path to master_cell_marker_db.csv "
+             f"(default: {_DEFAULT_MARKER_DB or 'REQUIRED — config path not found'})")
     parser.add_argument("--tissue", type=str, default=None, help="Filter marker DB for tissue")
     parser.add_argument("--min_overlap", type=int, default=2, help="Minimum gene overlap count to report (default: 2)")
     parser.add_argument("--background_gene_count", type=int, default=None, help="Override background gene count N for hypergeometric test")
-    parser.add_argument("--hgnc_map", type=str, default=None, help="Path to HGNC complete set file for gene alias resolution")
+    parser.add_argument("--hgnc_map", type=str, default=_DEFAULT_HGNC_MAP,
+        help="Path to HGNC complete set file for gene alias resolution "
+             f"(default: {_DEFAULT_HGNC_MAP or 'None'})")
     parser.add_argument("--deg_format", type=str, default=None, choices=['seurat', 'scanpy', 'generic'], help="Force a specific DEG input format (default: auto-detect)")
     parser.add_argument("--no_hierarchy", action="store_true", help="Skip hierarchical annotation")
     parser.add_argument("--umap_csv", type=str, default=None,
