@@ -75,10 +75,19 @@ pip install h5py
 Download and parse all 14 source databases (~10–20 minutes, internet required):
 
 ```bash
+# Full pipeline: download + build + validate
 python3 test/test_classes.py
+
+# Re-build from cached raw files (skip download)
+python3 test/test_classes.py --skip_download
 ```
 
-This creates `data/processed_combined_db/master_cell_marker_db.csv` and the HGNC alias map at `data/reference/hgnc_complete_set.txt`.
+This creates:
+- `data/processed_combined_db/master_cell_marker_db.csv` — 442K-row master database
+- `data/reference/hgnc_complete_set.txt` — HGNC gene alias map
+- `data/processed_combined_db/quarantine_log.csv` — schema violation log
+
+The test prints a validation summary with row counts, ontology coverage, and per-database statistics.
 
 ---
 
@@ -194,6 +203,68 @@ SapiensOntoCellMap/
 │   └── test_classes.py              # Full pipeline integration test (downloads + builds DB)
 ├── pyproject.toml                   # Package metadata and dependencies
 └── requirements.txt                 # Pinned environment snapshot
+```
+
+---
+
+## Testing
+
+### 1. Build the database (integration test)
+
+```bash
+# Full: download all 14 databases + HGNC + build + validate
+python3 test/test_classes.py
+
+# Re-build only (cached raw files already present)
+python3 test/test_classes.py --skip_download
+```
+
+Expected output includes per-database row counts and summary statistics:
+```
+  Total rows         : 442,000+
+  Unique genes       : 22,469
+  Unique cell types  : 1,208
+  Unique tissues     : 266
+  RESULT: SUCCESS
+```
+
+### 2. Benchmark (PBMC3k, requires internet + ~5 min first run)
+
+```bash
+# Install benchmark dependencies (one-time)
+pip install scanpy celltypist
+
+# Run full benchmark: SapiensOntoCellMap vs CellTypist on PBMC3k
+python3 benchmarking/benchmark_pbmc3k.py
+
+# Re-run using cached DEGs (skip AnnData download)
+python3 benchmarking/benchmark_pbmc3k.py --deg_csv benchmarking/results/pbmc3k_degs.csv
+
+# Skip CellTypist comparison
+python3 benchmarking/benchmark_pbmc3k.py --no_celltypist
+```
+
+Outputs: `benchmarking/results/benchmark_summary.txt`, per-cluster CSV, and 3 publication figures.
+
+### 3. Annotate a sample (end-to-end test)
+
+```bash
+# scRNA-seq (Seurat FindAllMarkers CSV)
+python3 src/cluster_annotation/get_cluster_annotation.py \
+    /path/to/cluster_markers.csv  MY_SAMPLE  /path/to/output/ \
+    --deg_type scrna \
+    --marker_db data/processed_combined_db/master_cell_marker_db.csv \
+    --hgnc_map data/reference/hgnc_complete_set.txt \
+    --tissue skin \
+    --background_gene_count 20000
+
+# Spatial (Space Ranger outs/ directory)
+python3 src/cluster_annotation/get_cluster_annotation.py \
+    /path/to/spaceranger_outs/  MY_SAMPLE  /path/to/output/ \
+    --deg_type spatial \
+    --marker_db data/processed_combined_db/master_cell_marker_db.csv \
+    --hgnc_map data/reference/hgnc_complete_set.txt \
+    --tissue skin
 ```
 
 ---
