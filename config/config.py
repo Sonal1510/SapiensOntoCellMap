@@ -32,6 +32,23 @@ os.makedirs(REFERENCE_DATA_DIR, exist_ok=True)
 HGNC_COMPLETE_SET_URL = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
 HGNC_COMPLETE_SET_FILE = os.path.join(REFERENCE_DATA_DIR, "hgnc_complete_set.txt")
 
+# MSigDB Hallmark cell-cycle gene sets (Liberzon et al., Cell Systems 2015;
+# Subramanian et al., PNAS 2005).  Used for Proliferative_Flag detection.
+# .grp format: plain-text, one HGNC gene symbol per line, comment lines start with '#'.
+#
+# Gene sets used:
+#   G2M: HALLMARK_G2M_CHECKPOINT  — 200 genes (G2/M transition + S-phase overlap)
+#   E2F: HALLMARK_E2F_TARGETS     — 200 genes (E2F transcription factor targets,
+#        the canonical S-phase / cell-cycle entry gene set in the Hallmark collection)
+#
+# Note: The MSigDB Hallmark collection does not contain a separate
+# "HALLMARK_G1S_CHECKPOINT" gene set. HALLMARK_E2F_TARGETS is the
+# established Hallmark equivalent for G1/S cell-cycle genes.
+MSIGDB_G2M_URL = "https://www.gsea-msigdb.org/gsea/msigdb/human/download_geneset.jsp?geneSetName=HALLMARK_G2M_CHECKPOINT&fileType=grp"
+MSIGDB_E2F_URL = "https://www.gsea-msigdb.org/gsea/msigdb/human/download_geneset.jsp?geneSetName=HALLMARK_E2F_TARGETS&fileType=grp"
+MSIGDB_G2M_FILE = os.path.join(REFERENCE_DATA_DIR, "HALLMARK_G2M_CHECKPOINT.grp")
+MSIGDB_E2F_FILE = os.path.join(REFERENCE_DATA_DIR, "HALLMARK_E2F_TARGETS.grp")
+
 
 # --- Dynamic Database and Parser Configuration ---
 # NOTE: We now use a string 'parser_key' instead of importing the class directly.

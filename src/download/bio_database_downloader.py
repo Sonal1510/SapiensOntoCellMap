@@ -14,7 +14,12 @@ try:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     if project_root not in sys.path:
         sys.path.append(project_root)
-    from config.config import RAW_DATA_DIR, DATABASE_CONFIG, REFERENCE_DATA_DIR, HGNC_COMPLETE_SET_URL, HGNC_COMPLETE_SET_FILE
+    from config.config import (
+        RAW_DATA_DIR, DATABASE_CONFIG, REFERENCE_DATA_DIR,
+        HGNC_COMPLETE_SET_URL, HGNC_COMPLETE_SET_FILE,
+        MSIGDB_G2M_URL, MSIGDB_G2M_FILE,
+        MSIGDB_E2F_URL, MSIGDB_E2F_FILE,
+    )
 except ImportError as e:
     print(f"❌ A critical import error occurred: {e}")
     print("Please ensure that all dependencies are installed and the script is run from the project's root directory.")
@@ -160,6 +165,24 @@ class BioDataDownloader:
             available['hgnc_complete_set'] = result
         else:
             print("❌ HGNC download failed. Gene alias resolution will be unavailable.")
+
+        # --- MSigDB Hallmark cell-cycle gene sets (Proliferative_Flag) ---
+        # Liberzon et al., Cell Systems 2015; Subramanian et al., PNAS 2005
+        # G2M: HALLMARK_G2M_CHECKPOINT (200 genes, G2/M transition)
+        # E2F: HALLMARK_E2F_TARGETS    (200 genes, S-phase / cell-cycle entry)
+        print("\n--- Processing MSigDB HALLMARK_G2M_CHECKPOINT ---")
+        result = self._download_file(MSIGDB_G2M_URL, MSIGDB_G2M_FILE)
+        if result:
+            available['msigdb_g2m'] = result
+        else:
+            print("❌ MSigDB G2M download failed. Proliferative_Flag will not be computed.")
+
+        print("\n--- Processing MSigDB HALLMARK_E2F_TARGETS ---")
+        result = self._download_file(MSIGDB_E2F_URL, MSIGDB_E2F_FILE)
+        if result:
+            available['msigdb_e2f'] = result
+        else:
+            print("❌ MSigDB E2F download failed. Proliferative_Flag will not be computed.")
 
         print(f"\nTotal reference files available: {len(available)}")
         return available

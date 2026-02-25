@@ -1,9 +1,9 @@
-cluster,gt_cell_type,gt_cl_id,gt_lineage,predicted,predicted_cl,broad_type,confidence,top1_match,cl_exact_match,hierarchical_match,broad_type_match,celltypist_label,celltypist_top1,concordance
-CD4 T cells,CD4 T cells,CL:0000624,T cell,"naive thymus-derived CD4-positive, alpha-beta T cell",All Tissue,hematopoietic cell,1.0,True,False,True,True,T cells,False,False
-CD14+ Monocytes,CD14+ Monocytes,CL:0000860,Monocyte,CD14-positive monocyte,All Tissue,hematopoietic cell,1.0,True,False,True,False,Monocytes,True,True
-B cells,B cells,CL:0000236,B cell,B-2 B cell,All Tissue,hematopoietic cell,1.0,True,False,True,True,B cells,True,True
-CD8 T cells,CD8 T cells,CL:0000625,T cell,"effector CD8-positive, alpha-beta T cell",All Tissue,hematopoietic cell,1.0,True,False,True,True,T cells,False,False
-NK cells,NK cells,CL:0000623,NK cell,"CD16-positive, CD56-dim natural killer cell, human",All Tissue,hematopoietic cell,1.0,True,False,True,True,ILC,False,False
-FCGR3A+ Monocytes,FCGR3A+ Monocytes,CL:0000875,Monocyte,non-classical monocyte,All Tissue,hematopoietic cell,1.0,True,False,True,False,Monocytes,True,True
-Dendritic cells,Dendritic cells,CL:0000451,Dendritic cell,"myeloid dendritic cell, human",All Tissue,hematopoietic cell,1.0,True,False,True,True,DC,True,True
-Megakaryocytes,Megakaryocytes,CL:0000556,Megakaryocyte,platelet,All Tissue,hematopoietic cell,1.0,True,False,True,False,Megakaryocytes/platelets,True,True
+cluster,gt_cell_type,gt_cl_id,gt_lineage,predicted,predicted_cl,broad_type,confidence,top1_match,cl_exact_match,hierarchical_match,broad_type_match
+CD4 T cells,CD4 T cells,CL:0000624,T cell,"naive thymus-derived CD4-positive, alpha-beta T cell",All Tissue,"CD4-positive, alpha-beta T cell",1.0,True,False,True,True
+CD14+ Monocytes,CD14+ Monocytes,CL:0000860,Monocyte,CD14-positive monocyte,All Tissue,monocyte,1.0,True,False,True,True
+B cells,B cells,CL:0000236,B cell,B-2 B cell,All Tissue,"B cell, CD19-positive",1.0,True,False,True,True
+CD8 T cells,CD8 T cells,CL:0000625,T cell,"effector CD8-positive, alpha-beta T cell",All Tissue,"CD8-positive, alpha-beta T cell",1.0,True,False,True,True
+NK cells,NK cells,CL:0000623,NK cell,"CD16-positive, CD56-dim natural killer cell, human",All Tissue,mature natural killer cell,1.0,True,False,True,True
+FCGR3A+ Monocytes,FCGR3A+ Monocytes,CL:0000875,Monocyte,non-classical monocyte,All Tissue,monocyte,1.0,True,False,True,True
+Dendritic cells,Dendritic cells,CL:0000451,Dendritic cell,"myeloid dendritic cell, human",All Tissue,myeloid dendritic cell,1.0,True,False,True,True
+Megakaryocytes,Megakaryocytes,CL:0000556,Megakaryocyte,platelet,All Tissue,serotonin secreting cell,1.0,True,False,True,False

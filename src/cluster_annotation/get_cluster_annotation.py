@@ -37,10 +37,14 @@ try:
     from config.config import (
         PROCESSED_COMBINED_DATABASE_FILE as _DEFAULT_MARKER_DB,
         HGNC_COMPLETE_SET_FILE as _DEFAULT_HGNC_MAP,
+        MSIGDB_G2M_FILE as _DEFAULT_G2M_FILE,
+        MSIGDB_E2F_FILE as _DEFAULT_E2F_FILE,
     )
 except ImportError:
     _DEFAULT_MARKER_DB = None
     _DEFAULT_HGNC_MAP = None
+    _DEFAULT_G2M_FILE = None
+    _DEFAULT_E2F_FILE = None
 
 # Source-type quality weights for cross-database agreement scoring
 SOURCE_TYPE_WEIGHTS = {
@@ -55,13 +59,17 @@ SOURCE_TYPE_WEIGHTS = {
 # ---------------------------------------------------------------------------
 # Proliferative / Cell-cycle gene signature
 # ---------------------------------------------------------------------------
-# Canonical cell cycle genes drawn from two sources:
-#   • Tirosh et al. (Science 2016) — G1/S and G2/M gene modules defined from
-#     single-cell transcriptomics of human melanoma.  Widely adopted as the
-#     standard cell-cycle scoring gene set in scRNA-seq analysis.
-#   • Clinical pathology standards — MKI67 (Ki-67) and PCNA are FDA-recognised
-#     proliferation markers used in tumour grading; TOP2A is a companion
-#     diagnostic for anthracycline-based chemotherapy in breast cancer.
+# Source: MSigDB Hallmark gene sets downloaded at pipeline build time via
+#   download_reference_data() in src/download/bio_database_downloader.py.
+#   • HALLMARK_G2M_CHECKPOINT — 200 genes (G2/M transition)
+#   • HALLMARK_E2F_TARGETS    — 200 genes (E2F targets; canonical S-phase / cell-cycle
+#     entry gene set in the MSigDB Hallmark collection — the Hallmark collection does
+#     not contain a separate G1/S checkpoint gene set)
+#   Liberzon et al., Cell Systems 2015 (doi:10.1016/j.cels.2015.12.004)
+#   Subramanian et al., PNAS 2005 (doi:10.1073/pnas.0506580102)
+#
+# If the .grp files are absent, PROLIFERATIVE_GENES is an empty frozenset and
+# Proliferative_Flag is set to None (not computed) in the output CSV.
 #
 # Biological rationale:
 #   When a cluster's overlapping marker genes are dominated by cell-cycle genes
@@ -77,23 +85,92 @@ SOURCE_TYPE_WEIGHTS = {
 #   OR  ≥2 cycle genes AND they represent ≥33 % of the total overlap
 #       (catches small Xenium panels where a 4-gene overlap of 2 MKI67+TOP2A = 50 %)
 # ---------------------------------------------------------------------------
-PROLIFERATIVE_GENES = frozenset({
-    # Clinical / gold-standard markers
-    'MKI67', 'PCNA', 'TOP2A', 'AURKB', 'AURKA',
-    # G2/M cyclins & CDKs
-    'CDK1', 'CCNB1', 'CCNB2', 'CCNA2',
-    # G1/S cyclins
-    'CCNE1', 'CCNE2',
-    # DNA replication licensing (MCM complex; Whitfield et al., Mol Biol Cell 2002)
-    'MCM2', 'MCM3', 'MCM4', 'MCM5', 'MCM6', 'MCM7',
-    # Spindle assembly / mitosis execution
-    'PLK1', 'BUB1', 'BUB1B', 'UBE2C', 'TPX2',
-    'CENPA', 'CENPF', 'KIF2C', 'KIF20A', 'CDC20', 'NUSAP1',
-    # DNA synthesis
-    'TYMS', 'RRM2',
-    # Additional mitosis / proliferation markers (Tirosh et al.)
-    'STMN1', 'HMGB2', 'BIRC5',
-})
+
+import re as _re
+_GENE_SYMBOL_RE = _re.compile(r'^[A-Z][A-Z0-9\-\.]{0,31}$')
+
+
+def _load_proliferative_genes(g2m_path=None, e2f_path=None):
+    """
+    Load the proliferative gene set from MSigDB Hallmark .grp files.
+
+    Combines:
+      • HALLMARK_G2M_CHECKPOINT (G2/M transition genes)
+      • HALLMARK_E2F_TARGETS    (E2F target genes; canonical S-phase set in Hallmark)
+
+    .grp format: plain text, one HGNC gene symbol per line; comment/header
+    lines start with '#' or 'HALLMARK_'. Lines that do not match a valid HGNC
+    gene symbol pattern (uppercase, 1-32 chars, letters/digits/hyphen/dot) are
+    discarded with a warning — this guards against accidentally parsing HTML
+    content that some MSigDB endpoints return for invalid gene set names.
+
+    Returns an empty frozenset if files are missing or unreadable.
+    Proliferative_Flag is set to None (not computed) in that case.
+
+    Args:
+        g2m_path: Path to HALLMARK_G2M_CHECKPOINT.grp (or None)
+        e2f_path: Path to HALLMARK_E2F_TARGETS.grp (or None)
+
+    Returns:
+        frozenset of uppercase HGNC gene symbols, or frozenset() if unavailable
+    """
+    genes = set()
+    for label, path in [('G2M (HALLMARK_G2M_CHECKPOINT)', g2m_path),
+                        ('E2F (HALLMARK_E2F_TARGETS)', e2f_path)]:
+        if path and os.path.exists(path):
+            try:
+                with open(path) as fh:
+                    raw_lines = [line.strip() for line in fh]
+
+                valid_genes = set()
+                n_rejected = 0
+                for s in raw_lines:
+                    if not s or s.startswith('#') or s.startswith('HALLMARK_'):
+                        continue
+                    sym = s.upper()
+                    if _GENE_SYMBOL_RE.match(sym):
+                        valid_genes.add(sym)
+                    else:
+                        n_rejected += 1
+
+                if n_rejected > 0:
+                    logger.warning(
+                        f"MSigDB {label}: discarded {n_rejected} lines that did not "
+                        "match HGNC gene symbol format (possible HTML/redirect response)"
+                    )
+
+                if valid_genes:
+                    genes.update(valid_genes)
+                    logger.info(
+                        f"Loaded {len(valid_genes)} genes from MSigDB {label} "
+                        f"({os.path.basename(path)})"
+                    )
+                else:
+                    logger.warning(
+                        f"MSigDB {label} file yielded no valid gene symbols: {path}"
+                    )
+            except OSError as exc:
+                logger.warning(f"MSigDB {label} file could not be read ({path}): {exc}")
+        else:
+            logger.warning(
+                f"MSigDB {label} file not found: {path}. "
+                "Run download_reference_data() to fetch it."
+            )
+
+    if not genes:
+        logger.warning(
+            "Proliferative gene sets not loaded — Proliferative_Flag will not be computed. "
+            "Run the downloader (src/download/bio_database_downloader.py) to fetch "
+            "HALLMARK_G2M_CHECKPOINT.grp and HALLMARK_E2F_TARGETS.grp from MSigDB."
+        )
+
+    return frozenset(genes)
+
+
+PROLIFERATIVE_GENES = _load_proliferative_genes(_DEFAULT_G2M_FILE, _DEFAULT_E2F_FILE)
+if PROLIFERATIVE_GENES:
+    logger.info(f"Proliferative gene set loaded: {len(PROLIFERATIVE_GENES)} genes")
+
 _PROLIF_FLAG_MIN_GENES = 3    # absolute: ≥3 cycle genes in overlap → flag
 _PROLIF_FLAG_MIN_GENES2 = 2   # conditional: ≥2 AND high fraction → flag
 _PROLIF_FLAG_MIN_FRAC = 0.33  # fraction threshold for conditional path
@@ -458,7 +535,10 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
                 confidence_info = hierarchical_annotator.get_best_resolution(hier_df, cluster)
                 if confidence_info:
                     confidence = confidence_info.get('Confidence')
-                broad_name = hierarchical_annotator.get_broad_type(hier_df, cluster)
+                broad_name = hierarchical_annotator.get_broad_type(
+                    hier_df, cluster,
+                    top_cell_type=selected_hit.get('Top_Cell_Type')
+                )
                 if broad_name:
                     broad_type = broad_name
 
@@ -467,25 +547,32 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
 
             # --- Proliferative Signature Detection ---
             # Checks whether the overlapping marker genes are dominated by canonical
-            # cell cycle genes (Tirosh et al., Science 2016).  In cancer/inflamed tissue,
-            # such clusters may represent cycling or malignant cells rather than the
-            # annotated cell type.  Two thresholds are applied:
+            # cell cycle genes (MSigDB HALLMARK_G2M_CHECKPOINT + HALLMARK_G1S_CHECKPOINT;
+            # Liberzon et al., Cell Systems 2015).  In cancer/inflamed tissue, such clusters
+            # may represent cycling or malignant cells rather than the annotated cell type.
+            # Two thresholds are applied:
             #   (a) ≥3 cycle genes in overlap → unconditional flag
             #   (b) ≥2 cycle genes AND they represent ≥33 % of total overlap → flag
-            genes_str = selected_hit.get('Genes', '')
-            if genes_str:
-                overlap_genes = [g.strip().upper() for g in str(genes_str).split(',') if g.strip()]
-                prolif_hits = [g for g in overlap_genes if g in PROLIFERATIVE_GENES]
-                n_prolif = len(prolif_hits)
-                n_total = len(overlap_genes)
-                frac_prolif = n_prolif / n_total if n_total > 0 else 0.0
-                is_prolif = (n_prolif >= _PROLIF_FLAG_MIN_GENES) or \
-                            (n_prolif >= _PROLIF_FLAG_MIN_GENES2 and frac_prolif >= _PROLIF_FLAG_MIN_FRAC)
-                selected_hit['Proliferative_Flag'] = is_prolif
-                selected_hit['Proliferative_Genes'] = ', '.join(prolif_hits) if is_prolif else ''
-            else:
-                selected_hit['Proliferative_Flag'] = False
+            # Requires MSigDB .grp files downloaded via download_reference_data().
+            # If the gene set was not loaded, flag is set to None (not computed).
+            if not PROLIFERATIVE_GENES:
+                selected_hit['Proliferative_Flag'] = None
                 selected_hit['Proliferative_Genes'] = ''
+            else:
+                genes_str = selected_hit.get('Genes', '')
+                if genes_str:
+                    overlap_genes = [g.strip().upper() for g in str(genes_str).split(',') if g.strip()]
+                    prolif_hits = [g for g in overlap_genes if g in PROLIFERATIVE_GENES]
+                    n_prolif = len(prolif_hits)
+                    n_total = len(overlap_genes)
+                    frac_prolif = n_prolif / n_total if n_total > 0 else 0.0
+                    is_prolif = (n_prolif >= _PROLIF_FLAG_MIN_GENES) or \
+                                (n_prolif >= _PROLIF_FLAG_MIN_GENES2 and frac_prolif >= _PROLIF_FLAG_MIN_FRAC)
+                    selected_hit['Proliferative_Flag'] = is_prolif
+                    selected_hit['Proliferative_Genes'] = ', '.join(prolif_hits) if is_prolif else ''
+                else:
+                    selected_hit['Proliferative_Flag'] = False
+                    selected_hit['Proliferative_Genes'] = ''
 
             summary_data.append(selected_hit)
         else:

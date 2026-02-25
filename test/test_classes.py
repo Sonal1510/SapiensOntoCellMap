@@ -91,14 +91,14 @@ def run_build_and_validate():
     print(f"  Unique genes       : {df['gene'].nunique():,}")
     print(f"  Unique cell types  : {df['cell_name'].nunique():,}")
     print(f"  Unique tissues     : {df['tissue_name'].nunique():,}")
-    print(f"  Source databases   : {df['database_name'].nunique()}")
+    print(f"  Source databases   : {df['database'].nunique()}")
     print(f"  CL IDs assigned    : {df['cell_id'].str.startswith('CL:').sum():,}")
     print(f"  UBERON IDs assigned: {df['tissue_id'].str.startswith('UBERON:').sum():,}")
     print(f"  Quarantined rows   : {n_quarantine}")
     print("=" * 60)
     print()
     print("  Per-database row counts:")
-    for db, n in df["database_name"].value_counts().items():
+    for db, n in df["database"].value_counts().items():
         print(f"    {db:<45s} {n:>7,}")
     print()
     print("  RESULT: SUCCESS — all expected files present.")

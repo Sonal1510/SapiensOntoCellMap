@@ -324,13 +324,24 @@ class HierarchicalAnnotator:
         best = confident.loc[confident['Depth'].idxmax()]
         return best.to_dict()
 
-    def get_broad_type(self, cluster_annotations_df, cluster_id):
+    def get_broad_type(self, cluster_annotations_df, cluster_id, top_cell_type=None):
         """
         Get the broadest confident ancestor type for a cluster.
+
+        When top_cell_type is provided, the search is constrained to ancestors
+        of that cell type's CL ID. This prevents false-positive broad labels
+        caused by unrelated significant hits sharing housekeeping genes
+        (e.g., keratinocyte subtypes contaminating a T cell cluster's Broad_Type).
+
+        The deepest (most specific) qualifying ancestor in the top annotation's
+        lineage is returned. Falls back to the shallowest confident ancestor
+        across all results if no lineage ancestor is found.
 
         Args:
             cluster_annotations_df: Output of annotate_all_clusters
             cluster_id: e.g., "Cluster 0"
+            top_cell_type: Cell_type name string of the top-ranked annotation
+                           (used to constrain the ancestor search)
 
         Returns:
             Cell type name string, or None
@@ -339,7 +350,7 @@ class HierarchicalAnnotator:
             return None
 
         cluster_df = cluster_annotations_df[cluster_annotations_df['Cluster'] == cluster_id]
-        # Look for confident annotations with N_Supporting >= 2 (true aggregation)
+        # Candidate ancestors: confident nodes with true aggregation support
         broad = cluster_df[
             (cluster_df['Confidence'] >= self.confidence_threshold) &
             (cluster_df['N_Supporting'] >= 2)
@@ -348,6 +359,34 @@ class HierarchicalAnnotator:
         if broad.empty:
             return None
 
-        # Return the shallowest (broadest) annotation
+        # --- Constrained search: only ancestors of top annotation's lineage ---
+        if top_cell_type:
+            top_cl_id = self.cell_name_to_id.get(str(top_cell_type).strip().upper())
+            if top_cl_id:
+                # Get all ancestors of the top annotation (dict cl_id → distance)
+                top_ancestors = self._get_ancestors(top_cl_id)
+                ancestor_cl_ids = set(top_ancestors.keys())
+                # Exclude the top annotation itself, root cells, and terms too
+                # shallow to be informative (depth < 2 from root)
+                ancestor_cl_ids.discard(top_cl_id)
+                ancestor_cl_ids.discard('CL:0000000')
+                ancestor_cl_ids.discard('CL:0000001')
+
+                lineage_broad = broad[broad['CL_ID'].isin(ancestor_cl_ids)]
+                # Non-obsolete only (belt-and-suspenders: annotate_cluster already
+                # filters, but this guards against stale cached DataFrames)
+                lineage_broad = lineage_broad[
+                    ~lineage_broad['Cell_Type'].str.lower().str.startswith('obsolete')
+                ]
+
+                if not lineage_broad.empty:
+                    # Return the deepest (most specific) lineage ancestor, tiebreak
+                    # on Combined_Score descending
+                    lineage_broad = lineage_broad.sort_values(
+                        by=['Depth', 'Combined_Score'], ascending=[False, False]
+                    )
+                    return lineage_broad.iloc[0]['Cell_Type']
+
+        # --- Fallback: shallowest confident ancestor across all results ---
         broadest = broad.loc[broad['Depth'].idxmin()]
         return broadest['Cell_Type']
