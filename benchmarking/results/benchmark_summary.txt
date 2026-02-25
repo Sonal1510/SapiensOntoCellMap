@@ -1,0 +1,23 @@
+SapiensOntoCellMap — PBMC3k Benchmark
+Date: 2026-02-24
+
+n_clusters: 8
+top1_accuracy: 1.0000
+cl_exact_accuracy: 0.0000
+hierarchical_accuracy: 1.0000
+broad_type_accuracy: 0.6250
+celltypist_top1_accuracy: 0.6250
+sapiensonto_celltypist_concordance: 0.6250
+
+Per-cluster predictions:
+CD4 T cells      → naive thymus-derived CD4-positive, alpha-beta T cell  [TOP1=True, HIER=True]
+CD14+ Monocytes  → CD14-positive monocyte                                [TOP1=True, HIER=True]
+B cells          → B-2 B cell                                            [TOP1=True, HIER=True]
+CD8 T cells      → effector CD8-positive, alpha-beta T cell              [TOP1=True, HIER=True]
+NK cells         → CD16-positive, CD56-dim natural killer cell, human    [TOP1=True, HIER=True]
+FCGR3A+ Monocytes→ non-classical monocyte                                [TOP1=True, HIER=True]
+Dendritic cells  → myeloid dendritic cell, human                         [TOP1=True, HIER=True]
+Megakaryocytes   → platelet                                              [TOP1=True, HIER=True]
+
+Key fix: sorting by Combined_Score (Weighted_Enrichment × -log10 adj_p_value)
+instead of adj_p_value selects specific sub-types over broad umbrella terms.

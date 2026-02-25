@@ -79,7 +79,7 @@ def plot_dynamic_heatmap_with_bars(
         # Filter to only existing clusters in heatmap
         existing = [c for c in sorted_clusters if c in heatmap_df.index]
         heatmap_df = heatmap_df.reindex(existing, fill_value=0)
-    except:
+    except (KeyError, TypeError, ValueError):
         heatmap_df = heatmap_df.sort_index()
 
     if cluster_axes and not heatmap_df.empty:
@@ -95,14 +95,16 @@ def plot_dynamic_heatmap_with_bars(
                 Z = linkage(clustered.T, method='average', metric='correlation')
                 D = dendrogram(Z, no_plot=True, labels=clustered.columns)
                 final_col_order = D['ivl'] + [c for c in heatmap_df.columns if c not in D['ivl']]
-            except: pass
+            except (ValueError, np.linalg.LinAlgError):
+                pass
 
         if len(rows_var) > 1:
             try:
                 Z = linkage(clustered, method='average', metric='correlation')
                 D = dendrogram(Z, no_plot=True, labels=clustered.index)
                 final_row_order = D['ivl'] + [r for r in heatmap_df.index if r not in D['ivl']]
-            except: pass
+            except (ValueError, np.linalg.LinAlgError):
+                pass
             
         heatmap_df = heatmap_df.reindex(index=final_row_order, columns=final_col_order)
 
@@ -149,10 +151,10 @@ def plot_dynamic_heatmap_with_bars(
     ax_bar.set_yticks(y_pos)
     ax_bar.set_yticklabels(heatmap_df.index)
     ax_bar.invert_yaxis()
-    ax_bar.set_xlabel("# Hits")
-    
+    ax_bar.set_xlabel("# Sig. Cell Type Hits")
+
     # Label is ONLY here on the bar chart
-    ax_bar.set_ylabel("Cluster", fontsize=12) 
+    ax_bar.set_ylabel("Cluster", fontsize=12)
     
     ax_bar.grid(axis='x', linestyle='--', alpha=0.6)
     for bar in bars:
@@ -181,6 +183,22 @@ def _reshape_deg_df(deg_df: pd.DataFrame) -> pd.DataFrame:
         df.rename(columns={'gene':'Feature Name','cluster':'Cluster','p_val_adj':'adj_p_value','avg_log2FC':'log2FC'}, inplace=True)
         if 'mean_counts' not in df.columns: df['mean_counts'] = 0
         if 'Feature ID' not in df.columns: df['Feature ID'] = df['Feature Name']
+        df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
+        return df
+
+    # Scanpy rank_genes_groups CSV format: names, group, pvals_adj, logfoldchanges
+    if 'names' in deg_df.columns and 'group' in deg_df.columns:
+        df = deg_df.copy()
+        df.rename(columns={
+            'names': 'Feature Name',
+            'group': 'Cluster',
+            'pvals_adj': 'adj_p_value',
+            'logfoldchanges': 'log2FC',
+        }, inplace=True)
+        if 'mean_counts' not in df.columns:
+            df['mean_counts'] = 0
+        if 'Feature ID' not in df.columns:
+            df['Feature ID'] = df['Feature Name']
         df['Cluster'] = "Cluster " + df['Cluster'].astype(str)
         return df
     
@@ -342,12 +360,35 @@ def create_deg_violin_plots(deg_df_reshaped, p_val_thresh, log2fc_thresh, mean_c
     log2fc_html = fig_log2fc.to_html(full_html=False, include_plotlyjs=False)
 
     combined_html = f"""
-    <div style="text-align: center;"><h3>Adjusted p-value Distribution</h3>{p_val_html}</div>
-    <div style="text-align: center;"><h3>Log2 Fold Change Distribution</h3>{log2fc_html}</div>
+    <div style="text-align:center;">
+        <h3>Adjusted p-value Distribution (BH-corrected, log scale)</h3>
+        <p style="font-size:12px;color:#555;max-width:800px;margin:0 auto 8px;">
+        Distribution of BH-adjusted p-values across all DEGs per cluster.
+        Red dashed line = significance threshold. Values below the threshold passed filtering.
+        </p>
+        {p_val_html}
+    </div>
+    <div style="text-align:center;">
+        <h3>Log₂ Fold Change Distribution (symlog scale)</h3>
+        <p style="font-size:12px;color:#555;max-width:800px;margin:0 auto 8px;">
+        Distribution of log₂ fold changes per cluster (cluster vs. all other clusters).
+        Red dashed line = upregulation threshold. Only genes above this line were used for enrichment.
+        Symlog scale handles both small and large values without clipping.
+        </p>
+        {log2fc_html}
+    </div>
     """
     if mean_counts_html:
         combined_html += f"""
-        <div style="text-align: center;"><h3>Mean Counts Distribution</h3>{mean_counts_html}</div>
+        <div style="text-align:center;">
+            <h3>Mean Gene Counts Distribution (log scale, spatial only)</h3>
+            <p style="font-size:12px;color:#555;max-width:800px;margin:0 auto 8px;">
+            Average UMI/read count per gene across cells/spots in each cluster.
+            Low mean counts indicate lowly-expressed genes that may be filtered out.
+            Red dashed line = auto-calibrated mean counts threshold (75th percentile, spatial).
+            </p>
+            {mean_counts_html}
+        </div>
         """
     return combined_html
 
@@ -358,11 +399,19 @@ def plot_deg_counts_barchart(markers):
     if s.empty: return "<h3>DEGs per Cluster</h3><p>No differentially expressed genes found for any cluster.</p>"
     s = s.reindex(sorted(s.index, key=natural_sort_key))
     fig = px.bar(x=s.index, y=s.values,
-                 title='Number of Genes per Cluster for Hypergeometric Test',
-                 labels={'x':'Cluster', 'y':'Number of Genes'}, color=s.index, text=s.values)
+                 title='DEGs per Cluster used as input to Hypergeometric Enrichment Test<br>'
+                       '<sup>Only genes passing adj. p-value, Log₂FC and mean counts filters are counted</sup>',
+                 labels={'x': 'Cluster', 'y': 'Number of DEGs'}, color=s.index, text=s.values)
     fig.update_layout(showlegend=False)
     fig.update_traces(marker_color='steelblue', textposition='outside')
-    return f'<h3>DEGs per Cluster</h3>{fig.to_html(full_html=False, include_plotlyjs=False)}<hr style="margin: 25px 0;">'
+    return (
+        f'<h3>DEGs per Cluster</h3>'
+        f'<p style="font-size:12px;color:#555;">Number of differentially expressed genes per cluster '
+        f'that passed all thresholds and were used as input to the hypergeometric enrichment test. '
+        f'Higher counts generally yield more robust annotations.</p>'
+        f'{fig.to_html(full_html=False, include_plotlyjs=False)}'
+        f'<hr style="margin: 25px 0;">'
+    )
 
 def create_deg_tables_html(deg_df, cluster_markers, p_val_thresh, log2fc_thresh, mean_counts_thresh):
     reshaped = _reshape_deg_df(deg_df)
@@ -398,43 +447,61 @@ def create_deg_tables_html(deg_df, cluster_markers, p_val_thresh, log2fc_thresh,
 def _prepare_sig_table(df, tid):
     if df.empty: return "<p>No significant results.</p>", False
     d = df.copy()
-    
+
     if 'Cluster' in d.columns:
         cats = sorted(d['Cluster'].unique(), key=natural_sort_key)
         d['Cluster'] = d['Cluster'].astype(pd.api.types.CategoricalDtype(categories=cats, ordered=True))
-        
+
         sort_cols = ['Cluster', 'adj_p_value']
         asc = [True, True]
-        
         if 'Weighted_Enrichment' in d.columns:
             sort_cols.append('Weighted_Enrichment')
             asc.append(False)
         else:
             sort_cols.append('Enrichment_ratio')
             asc.append(False)
-            
         d.sort_values(by=sort_cols, ascending=asc, inplace=True)
 
     has_genes = 'Overlapping_genes' in d.columns
     if has_genes:
         d['Full Gene List'] = d['Overlapping_genes']
-        d['Overlapping_genes'] = d['Overlapping_genes'].apply(lambda x: (str(x)[:40] + '...') if len(str(x))>40 else x)
-        d.insert(0, '', '')
+        d['Overlapping_genes'] = d['Overlapping_genes'].apply(
+            lambda x: (str(x)[:40] + '…') if len(str(x)) > 40 else x)
+        d.insert(0, '', '')  # expand arrow column
 
-    fmts = {
-        'p_value': '{:.2e}'.format, 
-        'adj_p_value': '{:.2e}'.format, 
-        'Enrichment_ratio': '{:.2f}'.format, 
-        'Weighted_Enrichment': '{:.2f}'.format,
-        'Weighted_Recall': '{:.2f}'.format
+    # Rename columns to human-readable labels
+    col_rename = {
+        'Cell_type':            'Cell Type',
+        'adj_p_value':          'Adj. P-Value (BH-FDR)',
+        'p_value':              'P-Value',
+        'Enrichment_ratio':     'Enrichment Ratio (k/n)÷(K/N)',
+        'Weighted_Recall':      'Weighted Recall (W_overlap/W_ref)',
+        'Weighted_Enrichment':  'Weighted Enrichment',
+        'Combined_Score':       'Combined Score',
+        'N_Databases':          'N Databases',
+        'Overlapping_genes':    'Overlapping Genes ▶',
+        'n_overlap':            'k (Overlap)',
+        'n_query':              'n (Query)',
+        'n_ref':                'K (Reference)',
+        'N_background':         'N (Background)',
     }
-            
+    d.rename(columns=col_rename, inplace=True)
+
+    # Build formatters using renamed keys
+    fmts = {}
+    for old, new in col_rename.items():
+        if old in ('adj_p_value', 'p_value') and new in d.columns:
+            fmts[new] = '{:.2e}'.format
+        elif old in ('Enrichment_ratio', 'Weighted_Enrichment',
+                     'Weighted_Recall', 'Combined_Score') and new in d.columns:
+            fmts[new] = '{:.3f}'.format
+
     html = d.to_html(
-        classes="display compact", 
-        index=False, 
-        table_id=tid, 
-        formatters=fmts, 
-        float_format='{:.3f}'.format
+        classes="display compact",
+        index=False,
+        table_id=tid,
+        formatters=fmts,
+        float_format='{:.3f}'.format,
     )
     return html, has_genes
 
@@ -722,7 +789,7 @@ def _create_publication_umap(umap_data, sample_name, output_dir):
 
         ax1.set_xlabel('UMAP1', fontsize=11)
         ax1.set_ylabel('UMAP2', fontsize=11, labelpad=0)
-        ax1.set_title('GE Cluster', fontsize=12, fontweight='bold')
+        ax1.set_title('Graph-Expression Cluster ID', fontsize=12, fontweight='bold')
         ax1.set_xticks([])
         ax1.set_yticks([])
         for spine in ax1.spines.values():
@@ -985,6 +1052,49 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
     if top_annotation_df is not None and not top_annotation_df.empty:
         df = top_annotation_df.copy()
 
+        # --- Proliferative Signature Banner ---
+        # Built before column renaming so we can read Proliferative_Flag and
+        # Proliferative_Genes from the raw DataFrame.
+        prolif_cluster_genes = {}   # {cluster_str: genes_str}
+        if 'Proliferative_Flag' in df.columns and 'Cluster' in df.columns:
+            for _, pr in df.iterrows():
+                if pr.get('Proliferative_Flag') is True or str(pr.get('Proliferative_Flag', '')).lower() == 'true':
+                    prolif_cluster_genes[str(pr['Cluster'])] = str(pr.get('Proliferative_Genes', ''))
+
+        if prolif_cluster_genes:
+            flagged_list = ', '.join(
+                sorted(prolif_cluster_genes.keys(), key=natural_sort_key))
+            # Collect all unique proliferative genes seen across flagged clusters
+            all_prolif_genes = sorted({
+                g.strip() for v in prolif_cluster_genes.values()
+                for g in v.split(',') if g.strip()
+            })
+            gene_examples = ', '.join(all_prolif_genes[:6])
+            if len(all_prolif_genes) > 6:
+                gene_examples += f' (+{len(all_prolif_genes)-6} more)'
+            parts.append(
+                '<div style="background:#fff3cd;border:1px solid #ffc107;'
+                'border-radius:6px;padding:12px 18px;margin-bottom:14px;'
+                'line-height:1.6;">'
+                '<strong style="font-size:14px;">&#9888; Proliferative / Potentially Malignant Signature Detected</strong><br>'
+                f'Cluster(s) <strong>{flagged_list}</strong> have &ge;2 overlapping genes from the canonical '
+                f'cell-cycle gene set (<em>{gene_examples}</em>). '
+                'In specimens from <strong>cancer, inflamed, or wound-healing tissue</strong>, '
+                'these clusters may represent <strong>cycling or malignant cells</strong> '
+                'rather than the annotated resting cell type. '
+                'The enrichment test correctly identifies statistical overlap with marker databases, '
+                'but cell-cycle genes appear in many cell-type entries — the annotation reflects '
+                'proliferative identity, not lineage identity.<br>'
+                '<em style="font-size:11px;color:#666;">'
+                'Recommended follow-up: Ki-67 (MKI67) IHC, copy-number inference (inferCNV/CopyKAT), '
+                'pathologist review, or cell-cycle regression before re-annotation. '
+                'References: Tirosh et al., <em>Science</em> 2016 (cell-cycle gene modules); '
+                'Whitfield et al., <em>Mol Biol Cell</em> 2002 (MCM complex markers); '
+                'clinical Ki-67 scoring guidelines (Dowsett et al., <em>J Clin Oncol</em> 2011).'
+                '</em>'
+                '</div>'
+            )
+
         # Format columns for display
         fmt_df = df.copy()
         if 'P_Value' in fmt_df.columns:
@@ -1003,19 +1113,20 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
             fmt_df['Genes'] = fmt_df['Genes'].apply(
                 lambda x: (str(x)[:60] + '...') if len(str(x)) > 60 else str(x))
 
-        # Rename for display
+        # Rename for display (Proliferative_Flag/Genes excluded — shown as badge)
         display_cols = {
             'Cluster': 'Cluster', 'Top_Cell_Type': 'Cell Type',
             'Broad_Type': 'Broad Type', 'Confidence': 'Confidence',
-            'P_Value': 'P-Value', 'Score': 'Score',
-            'N_Databases': 'N Databases', 'Source': 'Source', 'Genes': 'Top Genes'
+            'P_Value': 'Adj. P-Value', 'Score': 'Score (Weighted Enrichment)',
+            'N_Databases': 'N Databases', 'Source': 'DB Source', 'Genes': 'Top Genes'
         }
         cols_present = [c for c in display_cols if c in fmt_df.columns]
         fmt_df = fmt_df[cols_present].rename(columns=display_cols)
 
-        # Color rows by confidence
+        # Color rows by confidence; inject ⚠ PROLIF badge where flagged
         rows_html = []
-        for _, row in fmt_df.iterrows():
+        for (_, row), (_, orig_row) in zip(fmt_df.iterrows(), df.iterrows()):
+            cluster_key = str(orig_row.get('Cluster', ''))
             conf_str = row.get('Confidence', '—')
             try:
                 conf_val = float(conf_str)
@@ -1027,6 +1138,18 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
                     bg = '#f8d7da'
             except (ValueError, TypeError):
                 bg = '#ffffff'
+
+            if cluster_key in prolif_cluster_genes:
+                prolif_g = prolif_cluster_genes[cluster_key]
+                row = row.copy()
+                if 'Cell Type' in row.index:
+                    row['Cell Type'] = (
+                        f'{row["Cell Type"]} '
+                        f'<span title="Proliferative signature genes: {prolif_g}" '
+                        f'style="background:#e85d04;color:#fff;border-radius:3px;'
+                        f'padding:1px 5px;font-size:10px;cursor:help;white-space:nowrap;">'
+                        f'&#9888; PROLIF</span>'
+                    )
 
             cells = ''.join(f'<td>{v}</td>' for v in row.values)
             rows_html.append(f'<tr style="background-color:{bg};">{cells}</tr>')
@@ -1041,6 +1164,24 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
         )
 
         parts.append('<h3>Recommended Cell Type per Cluster</h3>')
+        parts.append(
+            '<p style="font-size:12px;color:#555;margin-bottom:6px;">'
+            '<strong>Columns:</strong> '
+            '<em>Cell Type</em> — top annotation (Selected Tissue Level&nbsp;2, else All Tissue Level&nbsp;2). '
+            'A <span style="background:#e85d04;color:#fff;border-radius:3px;padding:1px 4px;font-size:10px;">&#9888;&nbsp;PROLIF</span> '
+            'badge flags clusters where &ge;2 overlapping genes are canonical cell-cycle markers '
+            '(see alert above for clinical interpretation). '
+            '<em>Broad Type</em> — broad CL ancestor (Depth&nbsp;≤&nbsp;3). '
+            '<em>Confidence</em> — fraction of known subtypes supporting this node. '
+            '<em>Score</em> — Weighted Enrichment Ratio&nbsp;= (W_overlap/n)&nbsp;÷&nbsp;(W_ref/N). '
+            '<em>N&nbsp;Databases</em> — number of independent databases corroborating the overlapping genes. '
+            '<em>Top Genes</em> — overlapping marker genes (first 60 chars). '
+            'Row color: '
+            '<span style="background:#d4edda;padding:1px 6px;border-radius:3px;">green</span> Confidence&nbsp;≥&nbsp;0.8 &nbsp;'
+            '<span style="background:#fff3cd;padding:1px 6px;border-radius:3px;">yellow</span> 0.5–0.8 &nbsp;'
+            '<span style="background:#f8d7da;padding:1px 6px;border-radius:3px;">red</span> &lt;&nbsp;0.5'
+            '</p>'
+        )
         parts.append(table_html)
 
     # UMAP scatter
@@ -1062,7 +1203,129 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
     return '\n'.join(parts)
 
 
-def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_maps, deg_table_html, params_maps, selected_tissue_name=None, hierarchical_results=None, top_annotation_df=None, umap_data=None, deg_df=None):
+def _build_deconvolution_tab_html(deconv_df):
+    """
+    Build the Deconvolution tab HTML from a cluster-level proportions DataFrame.
+
+    Shows:
+      1. Stacked horizontal bar chart — one bar per cluster, stacked by cell type
+         proportion (top 15 cell types by mean proportion across clusters).
+      2. Downloadable DataTable of per-cluster proportions.
+
+    Args:
+        deconv_df: pd.DataFrame (clusters x cell_types), values = proportions.
+                   Index = cluster names (e.g. "Cluster 1").
+
+    Returns:
+        HTML string
+    """
+    if deconv_df is None or deconv_df.empty:
+        return ""
+
+    parts = []
+
+    # Select top cell types by mean proportion (skip near-zero columns)
+    mean_props = deconv_df.mean(axis=0).sort_values(ascending=False)
+    top_ct = mean_props[mean_props > 0.005].head(15).index.tolist()
+    if not top_ct:
+        top_ct = mean_props.head(10).index.tolist()
+
+    # Sort clusters naturally for consistent ordering
+    sorted_clusters = sorted(deconv_df.index.tolist(), key=natural_sort_key)
+    plot_df = deconv_df.reindex(sorted_clusters)[top_ct]
+
+    # Compute "Other" = remaining proportion not captured by top_ct
+    # This ensures every bar reaches exactly 1.0 (100%)
+    other_vals = (1.0 - plot_df.sum(axis=1)).clip(lower=0.0)
+
+    # --- 1. Stacked horizontal bar chart (clusters × cell types) ---
+    colors = (
+        ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+         '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+         '#aec7e8','#ffbb78','#98df8a','#ff9896','#c5b0d5']
+    )
+
+    fig = go.Figure()
+    for j, ct in enumerate(top_ct):
+        ct_short = ct[:50] + ("…" if len(ct) > 50 else "")
+        fig.add_trace(go.Bar(
+            name=ct_short,
+            y=sorted_clusters,
+            x=plot_df[ct].values,
+            orientation='h',
+            marker_color=colors[j % len(colors)],
+            hovertemplate=(
+                f"{ct_short}<br>%{{y}}<br>Proportion: %{{x:.3f}}<extra></extra>"
+            ),
+        ))
+
+    # Add "Other" segment so each bar always reaches 1.0
+    if other_vals.max() > 0.001:
+        fig.add_trace(go.Bar(
+            name="Other cell types",
+            y=sorted_clusters,
+            x=other_vals.values,
+            orientation='h',
+            marker_color='#d3d3d3',
+            hovertemplate="Other cell types<br>%{y}<br>Proportion: %{x:.3f}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        barmode='stack',
+        title=(
+            f"Annotation-Derived Cell Type Composition per Cluster"
+            f" (Top {len(top_ct)} shown + Other)"
+        ),
+        xaxis_title="Proportion (bars sum to 1.0)",
+        yaxis_title="",
+        height=max(350, len(sorted_clusters) * 32 + 120),
+        margin=dict(l=110, r=20, t=60, b=50),
+        legend=dict(
+            orientation='v',
+            x=1.01, y=1.0,
+            xanchor='left',
+            font=dict(size=10),
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(
+            showgrid=True, gridcolor='#eeeeee',
+            showline=True, linecolor='black',
+            range=[0, 1],
+        ),
+        yaxis=dict(
+            showgrid=False,
+            showline=True, linecolor='black',
+            autorange='reversed',
+        ),
+    )
+    stacked_html = fig.to_html(
+        full_html=False, include_plotlyjs=False,
+        div_id="deconv_stack_bar", default_height="auto",
+    )
+    parts.append(f'<div style="margin-bottom:30px;">{stacked_html}</div>')
+
+    # --- 2. Per-cluster proportions table (all cell types, not just top) ---
+    display_df = deconv_df.round(4).copy()
+    # Drop columns that are all-zero across all clusters
+    display_df = display_df.loc[:, (display_df > 0).any(axis=0)]
+    display_df.index.name = 'Cluster'
+    table_html = display_df.to_html(
+        table_id="deconv_table",
+        classes="display compact",
+        border=0,
+    )
+    parts.append(
+        f'<p style="font-size:12px;color:#666;">'
+        f'{len(deconv_df)} clusters × {len(display_df.columns)} cell types '
+        f'(chart shows top {len(top_ct)} + Other; table shows all non-zero types)</p>'
+    )
+    parts.append(table_html)
+
+    return "\n".join(parts)
+
+
+def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_maps, deg_table_html, params_maps, selected_tissue_name=None, hierarchical_results=None, top_annotation_df=None, umap_data=None, deg_df=None, deconv_df=None):
     report_data = {}
     for ctx, levels in sig_results_maps.items():
         report_data[ctx] = {}
@@ -1078,6 +1341,9 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
 
     # Build hierarchy HTML section
     hierarchy_html = _build_hierarchy_html(hierarchical_results or {})
+
+    # Build deconvolution tab
+    deconv_html = _build_deconvolution_tab_html(deconv_df)
 
     # Build summary tab content
     import os
@@ -1143,16 +1409,21 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
             <div class="tab-link" onclick="openTab(event, 'visuals')">Enrichment Visuals</div>
             <div class="tab-link" onclick="openTab(event, 'results')">Hypergeometric Result</div>
             {% if hierarchy_html %}<div class="tab-link" onclick="openTab(event, 'hierarchy')">Hierarchy</div>{% endif %}
+            {% if deconv_html %}<div class="tab-link" onclick="openTab(event, 'deconvolution')">Composition</div>{% endif %}
         </div>
 
         {% if summary_html %}
         <div id="summary" class="tab-content active">
             <details class="tab-explanation" open>
                 <summary>About this tab</summary>
-                <p>Recommended cell type annotations for each cluster based on enrichment analysis.
-                Table shows top annotation per cluster with confidence scoring. UMAP (when available)
-                shows cluster identities colored by cell type. Marker heatmap shows top genes
-                driving each annotation.</p>
+                <p><strong>Top annotation per cluster</strong> from Level 2 weighted enrichment
+                (Selected Tissue context takes priority over All Tissue). Columns explained in the
+                table caption below. Row colors: <span style="background:#d4edda;padding:0 4px;">green</span>
+                = high confidence (≥0.8), <span style="background:#fff3cd;padding:0 4px;">yellow</span>
+                = moderate (0.5–0.8), <span style="background:#f8d7da;padding:0 4px;">red</span>
+                = low (&lt;0.5). UMAP panels (when available) show cluster layout colored by
+                cluster ID (left) and cell type (right). Marker heatmap shows log₂FC of top
+                genes driving each annotation, grouped by assigned cell type.</p>
             </details>
             {{ summary_html|safe }}
         </div>
@@ -1161,36 +1432,46 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         <div id="degs" class="tab-content {% if not summary_html %}active{% endif %}">
             <details class="tab-explanation" open>
                 <summary>About this tab</summary>
-                <p>Differentially expressed genes for each cluster that passed filtering thresholds.
-                Select a cluster to view its gene list. Violin plots show p-value, log2FC, and
-                mean counts distributions. Bar chart shows genes per cluster used for enrichment.</p>
+                <p><strong>Differentially expressed genes (DEGs)</strong> for each cluster after
+                applying the analysis thresholds (adj. p-value, Log₂FC, mean counts).
+                Select a cluster from the dropdown to view its sorted gene table.
+                <br>
+                <strong>Violin plots:</strong>
+                <em>Adj. p-value</em> — BH-corrected p-value on log scale; red dashed line = threshold.
+                <em>Log₂FC</em> — symlog-scaled fold change; red dashed line = upregulation threshold.
+                <em>Mean Counts</em> — average expression per gene across cells in the cluster (spatial only).
+                <br>
+                <strong>Bar chart:</strong> number of DEGs per cluster submitted to the enrichment test.</p>
             </details>
             {{ deg_tables|safe }}
         </div>
-        
+
         <div id="global_controls" style="display:none;">
              <div class="level-selector">
                 <label>1. Tissue Scope:</label>
                 <select id="tissue_select" onchange="updateView()">
-                    <option value="all_tissue" selected>All Tissue</option>
-                    {% if selected_tissue_name %}<option value="selected_tissue">Selected Tissue ({{ selected_tissue_name }})</option>{% endif %}
+                    <option value="all_tissue" selected>All Tissue (no tissue filter)</option>
+                    {% if selected_tissue_name %}<option value="selected_tissue">Selected Tissue: {{ selected_tissue_name }}</option>{% endif %}
                 </select>
                 <span style="margin: 0 15px; border-left: 1px solid #ccc;"></span>
                 <label>2. Annotation Level:</label>
                 <select id="level_select" onchange="updateView()">
-                    <option value="level1" selected>Level 1 (Granular/Conventional)</option>
-                    <option value="level2">Level 2 (Broad/Weighted)</option>
+                    <option value="level1" selected>Level 1 – Granular (per-database, unweighted)</option>
+                    <option value="level2">Level 2 – Broad (CL-normalized, evidence-weighted)</option>
                 </select>
             </div>
         </div>
-        
+
         <div id="visuals" class="tab-content">
             <details class="tab-explanation" open>
                 <summary>About this tab</summary>
-                <p>Enrichment heatmap scoring cell types (columns) against clusters (rows). Color
-                intensity = enrichment score. Use Top N selector to control displayed cell types.
-                Bar chart shows total significant hits per cluster. Use Tissue Scope and
-                Annotation Level selectors to switch analysis contexts.</p>
+                <p><strong>Enrichment heatmap</strong>: rows = clusters, columns = top-N cell types,
+                color = Weighted Enrichment score (higher is more enriched). The bar chart on the
+                left shows number of significant cell type hits per cluster.
+                Use the <em>Heatmap Top N</em> selector to show 1, 3, 5 or 10 cell types per cluster.
+                Use the <em>Tissue Scope</em> and <em>Annotation Level</em> selectors below to switch
+                between All-Tissue / Selected-Tissue and granular (Level 1, per-DB) / broad
+                (Level 2, CL-normalized) contexts.</p>
             </details>
             <div id="visuals_controls_placeholder"></div>
             {% for context, levels in report_data.items() %}
@@ -1217,10 +1498,24 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         <div id="results" class="tab-content">
             <details class="tab-explanation" open>
                 <summary>About this tab</summary>
-                <p>Full statistical results from hypergeometric enrichment test. Key columns:
-                adj_p_value (BH-corrected), Enrichment_ratio (observed/expected overlap),
-                Overlapping_genes (click expand arrow for full list). Table is sortable and
-                exportable. Use Tissue/Level selectors to switch views.</p>
+                <p><strong>Full hypergeometric enrichment results</strong> — one row per
+                (cluster, cell type) pair that passed the significance threshold.
+                Table is sortable and exportable (Copy / CSV / Excel buttons).
+                Click the <strong>▶</strong> expand arrow on any row to see the full overlapping gene list.
+                Use the <em>Tissue Scope</em> and <em>Annotation Level</em> selectors above to switch views.
+                <br><strong>Column guide:</strong>
+                <em>Adj. P-Value (BH-FDR)</em> — Benjamini–Hochberg corrected p-value across all
+                (cluster × cell type) tests; ≤ 0.05 = significant.
+                <em>Enrichment Ratio (k/n)÷(K/N)</em> — observed overlap fraction divided by
+                expected fraction; &gt;1 = enriched.
+                <em>Weighted Recall (W_overlap/W_ref)</em> — evidence-weighted fraction of the
+                reference cell type's markers that were found in this cluster's DEGs.
+                <em>Weighted Enrichment</em> — weighted analog of Enrichment Ratio
+                (W_overlap/n)÷(W_ref/N); primary ranking metric for Level 2.
+                <em>Combined Score</em> — Weighted Enrichment × −log₁₀(adj. p-value);
+                composite ranking (higher = stronger hit).
+                <em>N Databases</em> — number of independent databases corroborating the overlap genes.
+                <em>Overlapping Genes ▶</em> — first 40 chars; click ▶ for full list.</p>
             </details>
             <div id="results_controls_placeholder"></div>
             {% for context, levels in report_data.items() %}
@@ -1242,6 +1537,38 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
                 subtypes supporting the annotation. Green &ge;0.8, yellow 0.5-0.8, red &lt;0.5.</p>
             </details>
             {{ hierarchy_html|safe }}
+        </div>
+        {% endif %}
+
+        {% if deconv_html %}
+        <div id="deconvolution" class="tab-content">
+            <details class="tab-explanation" open>
+                <summary>About this tab</summary>
+                <p>Annotation-derived cell type composition scores per cluster. For each cluster,
+                the Combined Score from the hypergeometric enrichment test
+                (Weighted_Enrichment &times; &minus;log<sub>10</sub>(adj_p_value)) is normalised
+                across all significantly enriched cell types so that scores sum to 1.0 per cluster.
+                This approach uses the marker database as intended &mdash; via enrichment testing
+                &mdash; and works for both scRNA-seq and spatial data without requiring a full
+                expression matrix. The stacked bar chart shows the top cell types per cluster;
+                bars reach 1.0 with an &ldquo;Other cell types&rdquo; segment for remaining
+                proportions. The table below lists all non-zero scores per cluster and is
+                downloadable as CSV.</p>
+            </details>
+            {{ deconv_html|safe }}
+            <script>
+            $(document).ready(function(){
+                if($("#deconv_table").length && !$.fn.DataTable.isDataTable("#deconv_table")){
+                    $("#deconv_table").DataTable({
+                        pageLength: 25,
+                        dom: "Bfrtip",
+                        buttons: ["copy", "csv", "excel"],
+                        scrollX: true,
+                        order: []
+                    });
+                }
+            });
+            </script>
         </div>
         {% endif %}
     </div>
@@ -1372,6 +1699,7 @@ def generate_html_report(sample_name, output_path, sig_results_maps, plots_html_
         selected_tissue_name=selected_tissue_name,
         hierarchy_html=hierarchy_html,
         summary_html=summary_html,
+        deconv_html=deconv_html,
     )
     
     with open(output_path, "w", encoding='utf-8') as f: 

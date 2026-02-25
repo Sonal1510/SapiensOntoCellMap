@@ -38,6 +38,52 @@ SOURCE_TYPE_WEIGHTS = {
     'Computational': 0.5,
 }
 
+# ---------------------------------------------------------------------------
+# Proliferative / Cell-cycle gene signature
+# ---------------------------------------------------------------------------
+# Canonical cell cycle genes drawn from two sources:
+#   • Tirosh et al. (Science 2016) — G1/S and G2/M gene modules defined from
+#     single-cell transcriptomics of human melanoma.  Widely adopted as the
+#     standard cell-cycle scoring gene set in scRNA-seq analysis.
+#   • Clinical pathology standards — MKI67 (Ki-67) and PCNA are FDA-recognised
+#     proliferation markers used in tumour grading; TOP2A is a companion
+#     diagnostic for anthracycline-based chemotherapy in breast cancer.
+#
+# Biological rationale:
+#   When a cluster's overlapping marker genes are dominated by cell-cycle genes
+#   the enrichment test may match a specific cell type (e.g. "large pre-B-II
+#   cell") only because that cell type's database entry contains genes shared
+#   with the cell cycle programme.  In cancer or inflamed tissue, the true
+#   identity may be a CYCLING or MALIGNANT population.  Flagging this allows
+#   the user to correlate with Ki-67 IHC, pathology review, or copy-number
+#   inference before accepting the annotation.
+#
+# Thresholds (_PROLIF_FLAG_*):
+#   Flag if ≥3 cycle genes in the overlap  (absolute — clear proliferating cluster)
+#   OR  ≥2 cycle genes AND they represent ≥33 % of the total overlap
+#       (catches small Xenium panels where a 4-gene overlap of 2 MKI67+TOP2A = 50 %)
+# ---------------------------------------------------------------------------
+PROLIFERATIVE_GENES = frozenset({
+    # Clinical / gold-standard markers
+    'MKI67', 'PCNA', 'TOP2A', 'AURKB', 'AURKA',
+    # G2/M cyclins & CDKs
+    'CDK1', 'CCNB1', 'CCNB2', 'CCNA2',
+    # G1/S cyclins
+    'CCNE1', 'CCNE2',
+    # DNA replication licensing (MCM complex; Whitfield et al., Mol Biol Cell 2002)
+    'MCM2', 'MCM3', 'MCM4', 'MCM5', 'MCM6', 'MCM7',
+    # Spindle assembly / mitosis execution
+    'PLK1', 'BUB1', 'BUB1B', 'UBE2C', 'TPX2',
+    'CENPA', 'CENPF', 'KIF2C', 'KIF20A', 'CDC20', 'NUSAP1',
+    # DNA synthesis
+    'TYMS', 'RRM2',
+    # Additional mitosis / proliferation markers (Tirosh et al.)
+    'STMN1', 'HMGB2', 'BIRC5',
+})
+_PROLIF_FLAG_MIN_GENES = 3    # absolute: ≥3 cycle genes in overlap → flag
+_PROLIF_FLAG_MIN_GENES2 = 2   # conditional: ≥2 AND high fraction → flag
+_PROLIF_FLAG_MIN_FRAC = 0.33  # fraction threshold for conditional path
+
 # Helper for natural sorting (cluster 2 before cluster 10)
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
@@ -52,12 +98,16 @@ def get_weighted_marker_maps(df, level_col):
     source_type quality weight to the gene's total score.
 
     Returns:
-        weighted_map: { 'CellType': {'geneA': 2.3, 'geneB': 0.7} }
-        n_databases_map: { 'CellType': {'geneA': 3, 'geneB': 1} }
+        weighted_map:   { 'CellType': {'geneA': 2.3, 'geneB': 0.7} }
+        n_databases_map: { 'CellType': {'geneA': 3, 'geneB': 1} }  — per-gene count
+        db_names_map:   { 'CellType': {'geneA': {'DB1', 'DB2'}} }  — per-gene db sets
+                         Used downstream to compute N_Databases as the union of databases
+                         across all overlapping genes (i.e., how many independent studies
+                         contributed at least one overlapping marker for this annotation).
     """
     df_clean = df.dropna(subset=[level_col, 'gene']).copy()
     if df_clean.empty:
-        return {}, {}
+        return {}, {}, {}
 
     # Deduplicate: one entry per (cell_type, gene, database)
     deduped = df_clean.drop_duplicates(subset=[level_col, 'gene', 'database']).copy()
@@ -71,16 +121,24 @@ def get_weighted_marker_maps(df, level_col):
     # Count unique databases per (cell_type, gene)
     db_counts = deduped.groupby([level_col, 'gene'])['database'].nunique()
 
+    # Collect the actual set of database names per (cell_type, gene)
+    # This is used downstream to compute N_Databases as the union of databases
+    # across all overlapping genes — the correct measure of cross-study corroboration.
+    db_sets = deduped.groupby([level_col, 'gene'])['database'].apply(set)
+
     weighted_map = {}
     n_databases_map = {}
+    db_names_map = {}
     for (cell_type, gene), weight in weights.items():
         if cell_type not in weighted_map:
             weighted_map[cell_type] = {}
             n_databases_map[cell_type] = {}
+            db_names_map[cell_type] = {}
         weighted_map[cell_type][gene] = round(float(weight), 2)
         n_databases_map[cell_type][gene] = int(db_counts.get((cell_type, gene), 1))
+        db_names_map[cell_type][gene] = db_sets.get((cell_type, gene), set())
 
-    return weighted_map, n_databases_map
+    return weighted_map, n_databases_map, db_names_map
 
 def get_unweighted_marker_maps(df, level_col, distinct_col=None):
     """
@@ -99,10 +157,12 @@ def get_marker_maps_context(df):
     Generates appropriate maps for Level 1 (Unweighted) and Level 2 (Weighted).
     Returns:
         maps: {'level1': {...}, 'level2': {...}}
-        n_databases_maps: {'level2': {...}}  (only for weighted level)
+        n_databases_maps: {'level2': {...}}  — per-gene database counts
+        db_names_maps: {'level2': {...}}     — per-gene database name sets (for N_Databases)
     """
     maps = {}
     n_databases_maps = {}
+    db_names_maps = {}
 
     # --- Level 1: Conventional (Unweighted) ---
     # Key: database_cell_name
@@ -115,9 +175,10 @@ def get_marker_maps_context(df):
 
     # --- Level 2: Weighted ---
     # Key: cell_name
-    maps['level2'], n_databases_maps['level2'] = get_weighted_marker_maps(df, 'cell_name')
+    maps['level2'], n_databases_maps['level2'], db_names_maps['level2'] = \
+        get_weighted_marker_maps(df, 'cell_name')
 
-    return maps, n_databases_maps
+    return maps, n_databases_maps, db_names_maps
 
 def get_spaceranger_differential_cluster_file_path_multi_path_key(path_list, sample_name):
     if not path_list: return {}
@@ -173,7 +234,7 @@ def find_deg_files(input_path, sample_name, deg_type):
         logger.warning(f"No spatial differential_expression.csv files found in {input_path}")
     return path_map
 
-def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_databases_map=None):
+def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_databases_map=None, db_names_map=None):
     if not marker_db_dict:
         return (None, pd.DataFrame(), pd.DataFrame(), {'heatmap': {}},
                 {'p_val': args.pval, 'log2fc': args.log2fc, 'mean_counts': args.mean, 'top_n_genes': args.topgenes})
@@ -190,6 +251,7 @@ def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_database
         background_gene_count=args.background_gene_count,
         hgnc_map=getattr(args, 'hgnc_map', None),
         deg_format=getattr(args, 'deg_format', None),
+        auto_spatial_mean_filter=not getattr(args, 'no_auto_spatial_filter', False),
     )
     pipeline.fit()
 
@@ -198,32 +260,47 @@ def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_database
     if not all_results.empty:
         sig_results = all_results[all_results["adj_p_value"] < args.pval].copy()
 
+    def _compute_n_databases(df, cell_type_col, genes_col, n_databases_map, db_names_map):
+        """
+        Compute N_Databases per row = number of independent databases/studies that
+        contributed at least one of the overlapping marker genes for this annotation.
+
+        Uses the union of database name sets across all overlapping genes, which is
+        the biologically correct measure of cross-study corroboration. A cell type
+        supported by overlapping genes from 3 different scRNA-seq studies scores 3,
+        regardless of how many genes each study contributed.
+
+        Falls back to per-gene max if db_names_map is unavailable.
+        """
+        n_db_values = []
+        for _, row in df.iterrows():
+            cell_type = row[cell_type_col]
+            genes_str = row.get(genes_col, '')
+            if genes_str and cell_type in n_databases_map:
+                genes = [g.strip().upper() for g in str(genes_str).split(',')]
+                if db_names_map and cell_type in db_names_map:
+                    # Correct: count unique databases across all overlapping genes
+                    overlap_dbs = set()
+                    ct_db = db_names_map[cell_type]
+                    for g in genes:
+                        overlap_dbs.update(ct_db.get(g, ct_db.get(g.upper(), set())))
+                    n_db_values.append(len(overlap_dbs))
+                else:
+                    # Fallback: max of per-gene counts (better than min)
+                    db_counts = [n_databases_map[cell_type].get(g, n_databases_map[cell_type].get(g.upper(), 1)) for g in genes]
+                    n_db_values.append(max(db_counts) if db_counts else 0)
+            else:
+                n_db_values.append(0)
+        return n_db_values
+
     # Add N_Databases column if n_databases_map is available
     if n_databases_map and not sig_results.empty and 'Cell_type' in sig_results.columns and 'Overlapping_genes' in sig_results.columns:
-        n_db_values = []
-        for _, row in sig_results.iterrows():
-            cell_type = row['Cell_type']
-            genes_str = row.get('Overlapping_genes', '')
-            if cell_type in n_databases_map and genes_str:
-                genes = [g.strip().upper() for g in str(genes_str).split(',')]
-                db_counts = [n_databases_map[cell_type].get(g, n_databases_map[cell_type].get(g.upper(), 1)) for g in genes]
-                n_db_values.append(min(db_counts) if db_counts else 0)
-            else:
-                n_db_values.append(0)
-        sig_results['N_Databases'] = n_db_values
+        sig_results['N_Databases'] = _compute_n_databases(
+            sig_results, 'Cell_type', 'Overlapping_genes', n_databases_map, db_names_map)
 
     if n_databases_map and not all_results.empty and 'Cell_type' in all_results.columns and 'Overlapping_genes' in all_results.columns:
-        n_db_values = []
-        for _, row in all_results.iterrows():
-            cell_type = row['Cell_type']
-            genes_str = row.get('Overlapping_genes', '')
-            if cell_type in n_databases_map and genes_str:
-                genes = [g.strip().upper() for g in str(genes_str).split(',')]
-                db_counts = [n_databases_map[cell_type].get(g, n_databases_map[cell_type].get(g.upper(), 1)) for g in genes]
-                n_db_values.append(min(db_counts) if db_counts else 0)
-            else:
-                n_db_values.append(0)
-        all_results['N_Databases'] = n_db_values
+        all_results['N_Databases'] = _compute_n_databases(
+            all_results, 'Cell_type', 'Overlapping_genes', n_databases_map, db_names_map)
 
     analysis_params = {
         'p_val': pipeline.p_val_thresh,
@@ -289,14 +366,20 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
             if isinstance(df, pd.DataFrame) and not df.empty:
                 cluster_res = df[df['Cluster'] == cluster]
                 if not cluster_res.empty:
-                    sort_cols = ['adj_p_value']
-                    asc = [True]
-                    if 'Weighted_Enrichment' in cluster_res.columns:
-                        sort_cols.append('Weighted_Enrichment')
-                        asc.append(False)
+                    # Use Combined_Score (Weighted_Enrichment × -log10 p) as primary rank:
+                    # rewards specificity and penalises broad terms with many markers.
+                    if 'Combined_Score' in cluster_res.columns:
+                        sort_cols = ['Combined_Score']
+                        asc = [False]
                     else:
-                        sort_cols.append('Enrichment_ratio')
-                        asc.append(False)
+                        sort_cols = ['adj_p_value']
+                        asc = [True]
+                        if 'Weighted_Enrichment' in cluster_res.columns:
+                            sort_cols.append('Weighted_Enrichment')
+                            asc.append(False)
+                        else:
+                            sort_cols.append('Enrichment_ratio')
+                            asc.append(False)
 
                     cluster_res = cluster_res.sort_values(by=sort_cols, ascending=asc)
                     top_row = cluster_res.iloc[0]
@@ -321,14 +404,20 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
                 if isinstance(df, pd.DataFrame) and not df.empty:
                     cluster_res = df[df['Cluster'] == cluster]
                     if not cluster_res.empty:
-                        sort_cols = ['adj_p_value']
-                        asc = [True]
-                        if 'Weighted_Enrichment' in cluster_res.columns:
-                            sort_cols.append('Weighted_Enrichment')
-                            asc.append(False)
+                        # Use Combined_Score (Weighted_Enrichment × -log10 p) as primary rank:
+                        # rewards specificity and penalises broad terms with many markers.
+                        if 'Combined_Score' in cluster_res.columns:
+                            sort_cols = ['Combined_Score']
+                            asc = [False]
                         else:
-                            sort_cols.append('Enrichment_ratio')
-                            asc.append(False)
+                            sort_cols = ['adj_p_value']
+                            asc = [True]
+                            if 'Weighted_Enrichment' in cluster_res.columns:
+                                sort_cols.append('Weighted_Enrichment')
+                                asc.append(False)
+                            else:
+                                sort_cols.append('Enrichment_ratio')
+                                asc.append(False)
 
                         cluster_res = cluster_res.sort_values(by=sort_cols, ascending=asc)
                         top_row = cluster_res.iloc[0]
@@ -361,6 +450,29 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
 
             selected_hit['Confidence'] = confidence
             selected_hit['Broad_Type'] = broad_type
+
+            # --- Proliferative Signature Detection ---
+            # Checks whether the overlapping marker genes are dominated by canonical
+            # cell cycle genes (Tirosh et al., Science 2016).  In cancer/inflamed tissue,
+            # such clusters may represent cycling or malignant cells rather than the
+            # annotated cell type.  Two thresholds are applied:
+            #   (a) ≥3 cycle genes in overlap → unconditional flag
+            #   (b) ≥2 cycle genes AND they represent ≥33 % of total overlap → flag
+            genes_str = selected_hit.get('Genes', '')
+            if genes_str:
+                overlap_genes = [g.strip().upper() for g in str(genes_str).split(',') if g.strip()]
+                prolif_hits = [g for g in overlap_genes if g in PROLIFERATIVE_GENES]
+                n_prolif = len(prolif_hits)
+                n_total = len(overlap_genes)
+                frac_prolif = n_prolif / n_total if n_total > 0 else 0.0
+                is_prolif = (n_prolif >= _PROLIF_FLAG_MIN_GENES) or \
+                            (n_prolif >= _PROLIF_FLAG_MIN_GENES2 and frac_prolif >= _PROLIF_FLAG_MIN_FRAC)
+                selected_hit['Proliferative_Flag'] = is_prolif
+                selected_hit['Proliferative_Genes'] = ', '.join(prolif_hits) if is_prolif else ''
+            else:
+                selected_hit['Proliferative_Flag'] = False
+                selected_hit['Proliferative_Genes'] = ''
+
             summary_data.append(selected_hit)
         else:
             summary_data.append({
@@ -369,12 +481,14 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
                 'Source': 'None',
                 'P_Value': None, 'Score': None, 'Genes': '',
                 'Confidence': None, 'Broad_Type': None, 'N_Databases': None,
+                'Proliferative_Flag': False, 'Proliferative_Genes': '',
             })
 
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
         col_order = ['Cluster', 'Top_Cell_Type', 'Source', 'P_Value', 'Score',
-                      'Genes', 'Confidence', 'Broad_Type', 'N_Databases']
+                      'Genes', 'Confidence', 'Broad_Type', 'N_Databases',
+                      'Proliferative_Flag', 'Proliferative_Genes']
         summary_df = summary_df[[c for c in col_order if c in summary_df.columns]]
         out_path = os.path.join(output_dir, f"{job_name}_top_annotation_summary.csv")
         summary_df.to_csv(out_path, index=False)
@@ -382,6 +496,176 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
         return summary_df
 
     return pd.DataFrame()
+
+
+
+def _compute_annotation_composition(final_sig, tissue_specified):
+    """
+    Derive per-cluster cell type composition scores from annotation enrichment results.
+
+    For each cluster, collects all Level 2 significant enrichment results (selecting
+    the tissue-specific context when available, falling back to all-tissue), then
+    applies CL ontology ancestor pruning before normalising Combined_Score so that
+    only the most specific (leaf) cell types contribute to the final proportions.
+
+    Ancestor pruning:
+        The Level 2 enrichment test returns all significantly enriched cell types,
+        including generic CL ontological ancestors (e.g., "epithelial cell",
+        "barrier cell", "phagocyte") whose marker gene sets are supersets of more
+        specific descendants. Without pruning, these ancestors dilute the composition
+        of the specific cell type (e.g., "keratinocyte" gets 12% instead of 50%).
+
+        Pruning uses the hierarchical annotation output (N_Supporting column):
+        - N_Supporting == 1 → "leaf" node: this type has no more specific significant
+          descendant → keep for composition.
+        - N_Supporting > 1 → "ancestor" node: this type has significant descendants
+          that are more specific → exclude from composition.
+
+        The Supporting_Types column of leaf rows (N_Supporting == 1) contains the
+        database-facing cell type name (the sig_results Cell_type value). These are
+        used as the "keep set" per cluster. Cell types absent from hierarchical
+        (unmapped CL IDs) are kept by default.
+
+    Args:
+        final_sig      : dict {ctx_name: {lvl_name: DataFrame}} from run_enrichment_pipeline
+        tissue_specified: bool — whether a tissue-specific context was run
+
+    Returns:
+        pd.DataFrame (n_clusters × n_cell_types), values = normalised composition scores,
+        index = cluster names (e.g. "Cluster 1"), or None if no enrichment data available.
+    """
+    import numpy as np
+
+    # Priority: tissue-specific Level 2 > all-tissue Level 2
+    # Track which context we chose so we can load its matching hierarchical data
+    sig_df = None
+    chosen_ctx = None
+    for ctx in (['selected_tissue', 'all_tissue'] if tissue_specified else ['all_tissue']):
+        candidate = final_sig.get(ctx, {}).get('level2')
+        if isinstance(candidate, pd.DataFrame) and not candidate.empty:
+            sig_df = candidate
+            chosen_ctx = ctx
+            break
+
+    if sig_df is None or sig_df.empty:
+        return None
+    if 'Cluster' not in sig_df.columns or 'Cell_type' not in sig_df.columns:
+        return None
+
+    # Use Combined_Score directly if present; otherwise compute it
+    if 'Combined_Score' in sig_df.columns:
+        score_col = 'Combined_Score'
+    elif 'Weighted_Enrichment' in sig_df.columns and 'adj_p_value' in sig_df.columns:
+        sig_df = sig_df.copy()
+        sig_df['_comp_score'] = (
+            sig_df['Weighted_Enrichment'].astype(float)
+            * -np.log10(sig_df['adj_p_value'].astype(float).clip(lower=1e-300))
+        )
+        score_col = '_comp_score'
+    else:
+        sig_df = sig_df.copy()
+        sig_df['_comp_score'] = sig_df.get('Enrichment_ratio', pd.Series(1.0, index=sig_df.index))
+        score_col = '_comp_score'
+
+    # --- CL Ancestor Pruning ---
+    # Build per-cluster "leaf_names" from the hierarchical annotation:
+    #
+    # A leaf row (N_Supporting == 1) means this CL node has only one significant
+    # contributor — itself. Its Supporting_Types field holds the database-facing
+    # cell type name from the enrichment results. Collecting these names gives the
+    # set of "most specific" types per cluster; any sig type NOT in this set is an
+    # ancestor that has been superseded by a more specific descendant.
+    #
+    # Two additional filters prevent garbage passing the N_Supporting==1 check:
+    #  • OBSOLETE terms: CL retires old classes (e.g. "barrier cell" → CL:0000215
+    #    marked obsolete). The hierarchical Cell_Type starts with "obsolete" (case-
+    #    insensitive); their database names would pollute the leaf set.
+    #  • Depth < 2: root-adjacent terms (eukaryotic cell, animal cell, etc.) are not
+    #    connected to the main CL sub-graph and should never appear in composition.
+    #
+    # Safety net — top-1 re-inclusion:
+    #  If the highest-scoring sig type for a cluster was pruned as an ancestor (e.g.
+    #  "macrophage" gets pruned because "inflammatory macrophage" is also significant),
+    #  it is re-added to the pool. This ensures the dominant biology is always visible
+    #  even when more specific descendants are also enriched.
+    per_cluster_leaf_names = {}  # cluster → set of UPPERCASE cell type names (leaves)
+    hier_df = final_sig.get(chosen_ctx, {}).get('hierarchical') if chosen_ctx else None
+    if isinstance(hier_df, pd.DataFrame) and not hier_df.empty \
+            and 'N_Supporting' in hier_df.columns \
+            and 'Supporting_Types' in hier_df.columns \
+            and 'Cluster' in hier_df.columns:
+        for cluster, grp in hier_df.groupby('Cluster'):
+            leaf_names = set()
+            for _, row in grp.iterrows():
+                if int(row.get('N_Supporting', 0)) != 1:
+                    continue
+                # Skip obsolete CL terms (Cell_Type starts with "obsolete")
+                cl_name = str(row.get('Cell_Type', '') or '')
+                if cl_name.lower().startswith('obsolete'):
+                    continue
+                # Skip root-adjacent terms (Depth < 2 means not integrated into main ontology)
+                depth = int(row.get('Depth', 0) or 0)
+                if depth < 2:
+                    continue
+                raw = str(row.get('Supporting_Types', '') or '')
+                for name in raw.split(','):
+                    name = name.strip()
+                    if name:
+                        leaf_names.add(name.upper())
+            per_cluster_leaf_names[str(cluster)] = leaf_names
+
+    # Build composition per cluster
+    all_compositions = {}
+    total_pruned = 0
+    for cluster, grp in sig_df.groupby('Cluster'):
+        leaf_names = per_cluster_leaf_names.get(str(cluster), set())
+
+        if leaf_names:
+            grp_pruned = grp[grp['Cell_type'].str.upper().isin(leaf_names)].copy()
+            n_pruned = len(grp) - len(grp_pruned)
+
+            # Safety net: if the top-scoring type was pruned as an ancestor, re-include it.
+            # This keeps the dominant biological signal visible while still removing generic
+            # ancestors further down the Combined_Score ranking.
+            if not grp.empty:
+                top_row = grp.nlargest(1, score_col)
+                top_name = top_row['Cell_type'].values[0]
+                if top_name.upper() not in leaf_names:
+                    grp_pruned = pd.concat(
+                        [grp_pruned, top_row], ignore_index=True
+                    ).drop_duplicates(subset='Cell_type')
+                    n_pruned = max(n_pruned - 1, 0)
+
+            if grp_pruned.empty:
+                grp_pruned = grp  # full fallback if pruning removed everything
+                n_pruned = 0
+            total_pruned += n_pruned
+            grp = grp_pruned
+
+        scores = grp.set_index('Cell_type')[score_col].astype(float).clip(lower=0)
+        total = scores.sum()
+        if total > 0:
+            all_compositions[cluster] = (scores / total).to_dict()
+
+    if not all_compositions:
+        logger.warning("Annotation composition: no clusters with positive enrichment scores.")
+        return None
+
+    if total_pruned > 0:
+        logger.info(
+            f"Ancestor pruning: removed {total_pruned} generic CL ancestor types "
+            f"from composition pool (top-scoring type per cluster always retained)"
+        )
+
+    comp_df = pd.DataFrame.from_dict(all_compositions, orient='index').fillna(0.0)
+    comp_df.index.name = 'Cluster'
+    comp_df = comp_df.reindex(sorted(comp_df.index, key=natural_sort_key))
+
+    logger.info(
+        f"Annotation composition: {comp_df.shape[0]} clusters × "
+        f"{comp_df.shape[1]} cell types"
+    )
+    return comp_df
 
 
 def _auto_detect_umap_path(deg_file_path):
@@ -486,6 +770,10 @@ def main():
         help="CSV with UMAP coordinates (columns: Barcode, UMAP-1, UMAP-2)")
     parser.add_argument("--cell_cluster_csv", type=str, default=None,
         help="CSV with cell-cluster mapping (columns: Barcode, Cluster)")
+    parser.add_argument("--no_deconvolution", action="store_true",
+        help="Disable the Cell Type Composition tab in the HTML report.")
+    parser.add_argument("--no_auto_spatial_filter", action="store_true",
+        help="Disable automatic mean_counts_thresh calibration for spatial data.")
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -499,14 +787,17 @@ def main():
         n_databases_contexts = {}
 
         logger.info("Preparing maps for 'All Tissue'...")
-        contexts['all_tissue'], n_databases_contexts['all_tissue'] = get_marker_maps_context(full_df)
+        db_names_contexts = {}
+        contexts['all_tissue'], n_databases_contexts['all_tissue'], db_names_contexts['all_tissue'] = \
+            get_marker_maps_context(full_df)
 
         tissue_specified = False
         if args.tissue:
             logger.info(f"Preparing maps for Selected Tissue: '{args.tissue}'...")
             subset_df = full_df[full_df['tissue_name'].str.contains(args.tissue, case=False, na=False)]
             if not subset_df.empty:
-                contexts['selected_tissue'], n_databases_contexts['selected_tissue'] = get_marker_maps_context(subset_df)
+                contexts['selected_tissue'], n_databases_contexts['selected_tissue'], db_names_contexts['selected_tissue'] = \
+                    get_marker_maps_context(subset_df)
                 tissue_specified = True
             else:
                 logger.warning(f"Tissue '{args.tissue}' not found. Skipping.")
@@ -552,11 +843,13 @@ def main():
                 for lvl_name, m_map in maps.items():
                     logger.info(f"--- Context: {ctx_name} | Level: {lvl_name} ---")
 
-                    # Pass n_databases_map for weighted (level2) enrichment
+                    # Pass n_databases_map and db_names_map for N_Databases computation
                     ndb_map = n_databases_contexts.get(ctx_name, {}).get(lvl_name, None)
+                    ndb_names = db_names_contexts.get(ctx_name, {}).get(lvl_name, None)
 
                     (pipe, all_r, sig_r, plots, params) = run_enrichment_pipeline(
-                        deg_file, m_map, args, args.deg_type, n_databases_map=ndb_map
+                        deg_file, m_map, args, args.deg_type,
+                        n_databases_map=ndb_map, db_names_map=ndb_names,
                     )
 
                     if pipe:
@@ -603,7 +896,7 @@ def main():
             elif args.umap_csv and args.cell_cluster_csv:
                 umap_data = _load_umap_data(args.umap_csv, args.cell_cluster_csv, top_annotation_df)
 
-            # --- DEG Tables ---
+            # --- DEG Tables (spatial) ---
             if not valid_pipe:
                 deg_html = "<p>Error: No DEGs processed.</p>"
             else:
@@ -614,6 +907,29 @@ def main():
                     log2fc_thresh=valid_pipe.log2fc_thresh,
                     mean_counts_thresh=valid_pipe.mean_counts_thresh
                 )
+
+            # --- Cell Type Composition (annotation-derived, works for scRNA-seq + spatial) ---
+            # Derives per-cluster cell type proportions from enrichment scores:
+            #   score(cluster, cell_type) = Weighted_Enrichment × −log10(adj_p_value)
+            #   normalised across all significant cell types per cluster → sums to 1.0
+            # This is scientifically appropriate for marker-list databases: uses them
+            # via enrichment testing (as designed), not as expression profile surrogates.
+            deconv_df = None
+            if not getattr(args, 'no_deconvolution', False):
+                try:
+                    deconv_df = _compute_annotation_composition(
+                        final_sig=final_sig,
+                        tissue_specified=tissue_specified,
+                    )
+                    if deconv_df is not None:
+                        comp_out = os.path.join(
+                            algo_out_dir, f"{job_name}_composition_scores.csv"
+                        )
+                        deconv_df.to_csv(comp_out)
+                        logger.info(f"Composition scores saved: {comp_out}")
+                except Exception as e:
+                    logger.warning(f"Composition scoring failed (skipping tab): {e}")
+                    deconv_df = None
 
             # --- HTML Report ---
             # Collect hierarchical results for HTML report
@@ -636,6 +952,7 @@ def main():
                 top_annotation_df=top_annotation_df,
                 umap_data=umap_data,
                 deg_df=valid_pipe.raw_deg_df if valid_pipe else None,
+                deconv_df=deconv_df,
             )
             logger.info(f"Report: {report_path}")
 

@@ -1,9 +1,29 @@
+# --- Data directories (large files, machine-generated) ---
 data/*
 !data/pre_manually_downloaded_files/
-SapiensOntoCellMap_env
+
+# --- Virtual environment ---
+SapiensOntoCellMap_env/
+
+# --- Developer / session files ---
 CLAUDE.md
 features_update.md
 .claude/
+
+# --- Python cache ---
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# --- OS / IDE ---
 .DS_Store
+.vscode/
+.idea/
+*.swp
+
+# --- Large binary / generated data in benchmarking ---
+benchmarking/results/*.h5ad
+benchmarking/results/pbmc3k_degs.csv
+benchmarking/results/sapiensonto_out/
+src/cluster_annotation/data/

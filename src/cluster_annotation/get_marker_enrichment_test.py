@@ -139,6 +139,7 @@ class MarkerEnrichmentTest:
         background_gene_count=None,
         hgnc_map=None,
         deg_format=None,
+        auto_spatial_mean_filter=True,
     ):
         if not deg_file or not os.path.exists(deg_file):
             raise FileNotFoundError(f"DEG file not found: {deg_file}")
@@ -194,6 +195,7 @@ class MarkerEnrichmentTest:
         self.min_overlap = min_overlap
         self.N_override = background_gene_count
         self.deg_format = deg_format
+        self.auto_spatial_mean_filter = auto_spatial_mean_filter
 
         # --- HGNC Gene Alias Resolution ---
         self.alias_map = {}
@@ -246,11 +248,15 @@ class MarkerEnrichmentTest:
 
         self.deg_df_long = self._normalize_deg_df()
 
-        if self.deg_file_type == 'spatial' and self.mean_counts_thresh == 0.0:
+        if self.auto_spatial_mean_filter and self.deg_file_type == 'spatial' and self.mean_counts_thresh == 0.0:
             if 'Mean Counts' in self.deg_df_long.columns:
                 pos = self.deg_df_long[self.deg_df_long['Mean Counts'] > 0]['Mean Counts']
                 if not pos.empty:
                     self.mean_counts_thresh = pos.quantile(0.75)
+                    logging.info(
+                        f"Auto-calibrated spatial mean_counts_thresh to 75th percentile: "
+                        f"{self.mean_counts_thresh:.2f}. Pass auto_spatial_mean_filter=False to disable."
+                    )
 
         self.background_genes = set(self.deg_df_long["Feature Name"].unique())
 
@@ -399,11 +405,21 @@ class MarkerEnrichmentTest:
                     overlap_w_sum = sum(weighted_genes[g] for g in overlap_genes)
                     ref_w_sum = sum(weighted_genes[g] for g in cell_genes_set)
 
-                    # Weighted Recall
-                    row["Weighted_Recall"] = overlap_w_sum / ref_w_sum if ref_w_sum > 0 else 0
+                    # Weighted Recall: fraction of total reference evidence weight captured.
+                    # = overlap_w_sum / ref_w_sum
+                    # Values in [0,1]; 1 means all evidence-weighted markers were found.
+                    row["Weighted_Recall"] = round(
+                        overlap_w_sum / ref_w_sum if ref_w_sum > 0 else 0, 4
+                    )
 
-                    # Weighted Enrichment
-                    row["Weighted_Enrichment"] = (overlap_w_sum / n) * (N / ref_w_sum) if ref_w_sum > 0 else 0
+                    # Weighted Enrichment Ratio: observed evidence density / expected evidence density.
+                    # = (overlap_w_sum / n) / (ref_w_sum / N)
+                    # Equivalent to Weighted_Recall / (n/N) — the weighted analog of the
+                    # standard enrichment ratio (k/n)/(K/N). Values > 1 indicate enrichment.
+                    row["Weighted_Enrichment"] = round(
+                        (overlap_w_sum / n) / (ref_w_sum / N)
+                        if ref_w_sum > 0 and N > 0 else 0, 4
+                    )
 
                 results.append(row)
 
@@ -415,4 +431,15 @@ class MarkerEnrichmentTest:
         # Global FDR correction across ALL clusters
         combined = pd.concat(all_results_list, ignore_index=True)
         combined["adj_p_value"] = multi.multipletests(combined["p_value"], method="fdr_bh")[1]
+
+        # Combined_Score: integrates statistical significance with evidence-weighted effect size.
+        # = Weighted_Enrichment * -log10(adj_p_value)
+        # Provides a single ranking metric that rewards both low p-values and high evidence weight.
+        # Only computed in weighted mode.
+        if self.is_weighted_mode and "Weighted_Enrichment" in combined.columns:
+            adj_p_clipped = combined["adj_p_value"].clip(lower=1e-300)
+            combined["Combined_Score"] = (
+                combined["Weighted_Enrichment"] * (-np.log10(adj_p_clipped))
+            ).round(4)
+
         return combined.sort_values(["Cluster", "adj_p_value"])

@@ -38,7 +38,7 @@ transcriptomics. Despite 30+ published tools, three fundamental gaps persist:
 
 | Tool | Databases | Ontology | Spatial | Hierarchical | Multi-DB Evidence | Year | Journal |
 |------|-----------|----------|---------|-------------|-------------------|------|---------|
-| **SapiensOntoCellMap** | **14+** | **CL + UBERON** | **Yes** | **Planned** | **Yes (weighted)** | 2026 | — |
+| **SapiensOntoCellMap** | **14+** | **CL + UBERON** | **Yes** | **IMPLEMENTED** | **Yes (weighted)** | 2026 | — |
 | CellMarker 2.0 | 1 (own) | Partial (MeSH) | No | No | No | 2023 | NAR |
 | scType | 1 (curated) | No | No | No | No | 2022 | Nat Comms |
 | SCSA | 3 (CellMarker, CancerSEA, PanglaoDB) | No | No | No | No | 2020 | Front Genet |
@@ -76,7 +76,7 @@ transcriptomics. Despite 30+ published tools, three fundamental gaps persist:
 
 | Tool | Ontology Use | Method | Hierarchical Output | Status |
 |------|-------------|--------|-------------------|--------|
-| **SapiensOntoCellMap** | **CL + UBERON for normalization + planned hierarchy** | **Enrichment** | **Planned (multi-resolution)** | **Active** |
+| **SapiensOntoCellMap** | **CL + UBERON for normalization + hierarchy** | **Enrichment** | **IMPLEMENTED (multi-resolution + confidence scoring)** | **Active** |
 | OnClass | CL graph embedding | ML classifier + ontology propagation | Yes (ancestors scored) | 2021, Nat Comms |
 | CellO | CL hierarchy | Hierarchical classifier (one per CL node) | Yes (multi-level) | 2021, iScience |
 | Cell Ontology (OBO) | — | Standard vocabulary | — | Ongoing |
@@ -94,11 +94,12 @@ hierarchy consistency. Limitations:
 - No marker interpretability
 - No spatial support
 
-**SapiensOntoCellMap's planned hierarchical engine** would be unique in combining:
+**SapiensOntoCellMap's hierarchical engine (IMPLEMENTED)** is unique in combining:
 1. Marker-based enrichment (interpretable, no reference needed)
-2. CL ontology graph traversal (formal ancestor/descendant propagation)
-3. Multi-resolution output with confidence scoring
+2. CL ontology graph traversal (formal ancestor/descendant propagation, obsolete term filtering)
+3. Multi-resolution output with confidence scoring (broad/intermediate/fine/uncertain)
 4. Evidence from 14+ databases aggregated at each ontology level
+5. Icicle chart visualization of the hierarchy in the interactive HTML report
 
 ---
 
@@ -130,7 +131,7 @@ hierarchy consistency. Limitations:
     ┌─────────────────────────────────────────────────────────┐
     │  SapiensOntoCellMap fills the intersection:              │
     │  Multi-DB + Ontology-normalized + Enrichment-based       │
-    │  + Spatial-native + Hierarchical (planned)               │
+    │  + Spatial-native + Hierarchical (IMPLEMENTED)           │
     └─────────────────────────────────────────────────────────┘
 ```
 
@@ -151,6 +152,25 @@ hierarchy consistency. Limitations:
 5. **Interactive clinical-grade reports** with lazy-loaded heatmaps, violin
    distributions, and exportable result tables in a single self-contained HTML
 
+6. **Automatic proliferative / malignancy signature detection** — IMPLEMENTED
+   When a cluster's overlapping marker genes are dominated by canonical cell-cycle
+   genes (Tirosh et al., Science 2016; Whitfield et al., Mol Biol Cell 2002;
+   Ki-67 clinical guidelines — Dowsett et al., J Clin Oncol 2011), the report
+   flags the annotation with a ⚠ PROLIF badge and a clinical alert recommending
+   Ki-67 IHC correlation and inferCNV-based copy-number inference.
+
+   **Biological rationale:** Cell-cycle genes (MKI67, TOP2A, MCM2-7, AURKB, etc.)
+   appear in marker databases for many cell types because proliferating cells of
+   any lineage share these genes. A hypergeometric enrichment test can therefore
+   match a cycling keratinocyte to "large pre-B-II cell" simply due to shared
+   proliferative genes. In cancer/inflamed/scar tissue this is a critical false-
+   positive risk. No existing annotation tool detects or warns about this.
+
+   **Clinical relevance:** This bridges computational annotation and clinical
+   pathology — Ki-67 is FDA-recognised as a tumour proliferation marker used in
+   breast cancer (IHC4 score) and melanoma staging. Connecting scRNA-seq cluster
+   biology to established IHC workflows is unique and highly clinically actionable.
+
 ---
 
 ## 4. Proposed Features for Publication Readiness
@@ -161,20 +181,27 @@ hierarchy consistency. Limitations:
 |---------|--------|--------|--------|
 | Global FDR correction | DONE | Correctness | Complete |
 | Robust N detection (scRNA-seq) | DONE (warning) | Correctness | Complete |
-| Gene name normalization (case + alias) | DONE (case) | Recall | Alias mapping: 1 week |
+| Gene name normalization (case + alias) | DONE (case + HGNC alias) | Recall | Complete |
 | Minimum overlap filter (k >= 2) | DONE | Precision | Complete |
-| Hierarchical annotation engine | NOT STARTED | **Key differentiator** | 2-3 weeks |
-| Benchmarking suite (vs scType, SCSA, CellTypist) | NOT STARTED | Mandatory | 2 weeks |
-| Unit test suite | NOT STARTED | Reviewer requirement | 1 week |
+| Hierarchical annotation engine | **DONE** | Key differentiator | Complete |
+| Confidence scoring per annotation level | **DONE** | Interpretability | Complete |
+| Source-aware evidence weighting (6 tiers) | **DONE** | Methodology | Complete |
+| Scanpy / generic DEG input format | **DONE** (auto-detect) | Usability | Complete |
+| Proliferative / malignancy flag | **DONE** | Clinical utility | Complete |
+| Benchmarking suite (vs scType, SCSA, CellTypist) | **NOT STARTED** | **Mandatory** | 2-3 weeks |
+| Unit test suite (pytest) | **NOT STARTED** | **Reviewer requirement** | 1 week |
 
 ### P1: Strongly Recommended
 
 | Feature | Why | Effort |
 |---------|-----|--------|
-| Source-aware weighted enrichment | Methodology claim | 1 week |
-| Scanpy/MAST/edgeR input support | Broadens user base 10x | 3 days |
-| Confidence scoring per annotation | "How sure are you?" | 1 week |
+| ~~Source-aware weighted enrichment~~ | ~~Methodology claim~~ | **DONE** |
+| ~~Scanpy/MAST/edgeR input support~~ | ~~Broadens user base 10x~~ | **DONE** (auto-detect) |
+| ~~Confidence scoring per annotation~~ | ~~"How sure are you?"~~ | **DONE** |
+| ~~Proliferative/malignancy signature flag~~ | ~~Cancer clinical utility~~ | **DONE** |
 | Ambiguity detection ("T cell vs NK cell") | Clinical relevance | 1 week |
+| LLM-based database auto-update pipeline | Live knowledge base vs frozen snapshots | 2-3 weeks |
+| Hierarchy tree visualization improvement (sunburst/treemap) | Publication figure quality | 3 days |
 
 ### P2: Nice-to-Have (Impact Multipliers)
 
@@ -288,13 +315,19 @@ interpretability compared to scType, CellTypist, and Azimuth.
 
 ## 8. Critical Path to Submission
 
-### Phase 1: Core Engine (Weeks 1-3)
-- [ ] Implement hierarchical annotation engine (CL graph traversal)
-- [ ] Add confidence scoring per annotation level
-- [ ] Implement HGNC alias resolution for gene normalization
-- [ ] Support Scanpy rank_genes_groups input format
+### Phase 1: Core Engine — COMPLETE
+- [x] Implement hierarchical annotation engine (CL graph traversal, obsolete term filtering)
+- [x] Add confidence scoring per annotation level (broad/intermediate/fine/uncertain)
+- [x] Implement HGNC alias resolution (58K aliases loaded, applied to both DB and DEG)
+- [x] Support Scanpy rank_genes_groups input format (auto-detect: seurat/scanpy/generic)
+- [x] Source-aware evidence weighting (6 tiers: Experiment→Single-Cell→Company→Lit→Review→Comp)
+- [x] Proliferative / malignancy signature flag (Tirosh 2016 gene set, clinical alert in report)
+- [x] Hierarchical icicle chart in HTML report (per-cluster, multi-resolution)
 
-### Phase 2: Benchmarking (Weeks 4-5)
+### Phase 2: Benchmarking (CURRENT PRIORITY)
+- [x] Benchmarking script written: `benchmarking/benchmark_pbmc3k.py`
+      Handles full pipeline: data download → DEGs → SapiensOntoCellMap → CellTypist → metrics → figures
+- [ ] Run benchmark (requires: pip install scanpy celltypist)
 - [ ] Download and process PBMC 10x benchmark dataset
 - [ ] Run SapiensOntoCellMap + scType + CellTypist + Azimuth on same data
 - [ ] Compute accuracy, hierarchical accuracy, resolution score
@@ -313,7 +346,93 @@ interpretability compared to scType, CellTypist, and Azimuth.
 
 ---
 
-## 9. Literature References
+## 9. Planned Integrations (Feature Design)
+
+### 9.1 LLM-Based Database Auto-Update Pipeline
+
+**Problem:** PanglaoDB is frozen at 2020; CellMarker 2.0 at 2023. New scRNA-seq studies
+publish cell type marker tables weekly in supplements. Manual curation cannot scale.
+
+**Proposed design:**
+```
+PubMed → Abstract screening (LLM relevance filter)
+    → Full-text / supplement fetch (PMC Open Access)
+    → LLM extraction: (cell_type, gene_list, tissue, PMID)
+    → Ontology normalization (CL/UBERON lookup in existing pipeline)
+    → GenericFileParser → DatabaseCreator → master DB update
+    → DatabaseValidator → quarantine_log.csv for failed mappings
+```
+
+**Key design choices:**
+- Use Claude API (`anthropic` Python SDK) with a structured extraction prompt
+- Output: JSON schema `{"cell_type": str, "genes": [str], "tissue": str, "pmid": str}`
+- Conflict resolution: any auto-extracted entry labelled `source_type: "LLM-Extracted"`,
+  weight 0.6 (same as Review) until validated by human review → bump to appropriate tier
+- Run monthly as a cron job; git-tracked DB updates with PMID provenance
+- Relevant new databases: CellKB, CellCarta, Human BioMolecular Atlas Program (HuBMAP)
+
+**Why this matters for publication:** No existing marker DB or tool has a live-update
+mechanism. This directly addresses reviewers who ask "Is your database current?"
+
+**Implementation:** ~2-3 weeks. Requires Anthropic API key. Parallel track to benchmarking.
+
+---
+
+### 9.2 CellTypist Integration (Hybrid Annotation Validation)
+
+**Note:** CellTypist is NOT an LLM — it is a logistic regression classifier trained on
+the Human Cell Atlas (~850K cells, 20+ tissues). It is fast, accurate, and widely used.
+
+**Two integration modes:**
+
+**Mode A: Validation layer**
+- Run CellTypist on the same scRNA-seq dataset in parallel with SapiensOntoCellMap
+- Cross-tabulate: where do the tools agree/disagree?
+- Report: concordance metric per cluster in the HTML report Summary tab
+- Value: builds trust, flags uncertain annotations, strengthens paper
+
+**Mode B: Benchmarking comparator (mandatory for publication)**
+- Include CellTypist as one of the comparators in the benchmarking suite (Section 5)
+- Already planned in Section 5.3; this formalises it as an integration point
+
+**Implementation:**
+```python
+# pip install celltypist
+import celltypist
+model = celltypist.models.Model.load(model='Immune_All_High.pkl')
+predictions = celltypist.annotate(adata, model=model, majority_voting=True)
+```
+
+**CellTypist limitation:** requires AnnData / Scanpy object with raw counts — not
+compatible with pre-computed DEG CSVs. Mode A requires the user to supply a `.h5ad` file.
+Feasible as an optional `--celltypist_adata` flag; skip gracefully if not provided.
+
+---
+
+### 9.3 Hierarchical Clustering of Cluster Composition
+
+**What is already done:** `HierarchicalAnnotator` (CL ontology traversal) is fully
+implemented and outputs icicle charts per cluster in the HTML report.
+
+**What is MISSING (publication figure quality):**
+
+1. **Sunburst / treemap chart** — Plotly sunburst (px.sunburst) of the full CL hierarchy
+   for a sample, showing which cell type sub-trees were enriched. More intuitive than
+   icicle for a paper figure. ~1 day to implement.
+
+2. **Cluster-composition dendrogram** — Ward hierarchical clustering of the
+   `n_clusters × n_celltypes` composition matrix (the heatmap that already exists).
+   Adding a dendrogram shows which user-defined clusters have similar cell type makeup.
+   Use scipy.cluster.hierarchy for clustering + seaborn clustermap (already present).
+   ~3 hours to implement (just change `plot_dynamic_heatmap_with_bars` to `clustermap`).
+
+3. **Cross-resolution summary table** — For each cluster: Broad_Type | Intermediate_Type
+   | Fine_Type | Confidence — extracted from hierarchical output. Already available in
+   the CSV; needs a dedicated tab in the HTML report.
+
+---
+
+## 10. Literature References
 
 ### Marker Databases
 - Hu C, et al. CellMarker 2.0. *Nucleic Acids Res.* 2023;51(D1):D1091-D1097.

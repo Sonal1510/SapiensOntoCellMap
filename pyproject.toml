@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sapiensontocellmap"
+version = "0.1.0"
+description = "Ontology-aware cell type annotation via multi-database marker enrichment for scRNA-seq and spatial transcriptomics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Sonal Rashmi" },
+]
+keywords = [
+    "single-cell", "spatial-transcriptomics", "cell-type-annotation",
+    "ontology", "marker-enrichment", "deconvolution", "bioinformatics"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Intended Audience :: Science/Research",
+]
+
+# Core runtime dependencies (minimal set required for annotation + deconvolution)
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "statsmodels>=0.14",
+    "plotly>=6.0",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "jinja2>=3.1",
+    "openpyxl>=3.1",
+    "requests>=2.28",
+    "networkx>=3.0",
+    "tqdm>=4.60",
+    "cellxgene_ontology_guide>=1.7",
+    "scikit-learn>=1.2",
+    "hra-api-client>=0.16",
+    "h5py>=3.8",
+]
+
+[project.optional-dependencies]
+# Full development environment (matches requirements.txt)
+dev = [
+    "jupyterlab>=4.0",
+    "ipython>=8.0",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+# PDF annotation support
+pdf = [
+    "pymupdf>=1.22",
+]
+# Deep learning (sentence embeddings for future NLP features)
+nlp = [
+    "torch>=2.0",
+    "transformers>=4.30",
+    "sentence-transformers>=2.0",
+]
+
+[project.scripts]
+# CLI entry points
+sapiensonto-annotate = "src.cluster_annotation.get_cluster_annotation:main"
+sapiensonto-deconvolve = "src.deconvolution.get_deconvolution:main"
+sapiensonto-visualize = "src.visualization.db_process:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "config"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "config/",
+    "requirements.txt",
+    "README.md",
+    "pyproject.toml",
+]
+exclude = [
+    "SapiensOntoCellMap_env/",
+    "data/",
+    "__pycache__/",
+    "*.pyc",
+]
+
+# ---------------------------------------------------------------------------
+# uv usage:
+#
+#   # Install core package into a new venv managed by uv:
+#   uv venv
+#   uv pip install -e .
+#
+#   # Install with full dev extras:
+#   uv pip install -e ".[dev,pdf]"
+#
+#   # Reproduce the full environment from requirements.txt (exact pin):
+#   uv pip install -r requirements.txt
+#
+#   # Lock the environment (generates uv.lock):
+#   uv lock
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

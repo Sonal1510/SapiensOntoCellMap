@@ -93,6 +93,9 @@ DATABASE_CONFIG = {
         }
     },
     "scar_cell_marker_gse130973": {
+        # Ji et al., Cell 2020 — scRNA-seq of 11 primary human skin cancers (SCC).
+        # Marker genes from Seurat FindAllMarkers on annotated cell clusters.
+        # Biological evidence tier: Single-Cell Sequencing (NOT Computational).
         "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE130973_2020_sc_skin_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
@@ -100,11 +103,14 @@ DATABASE_CONFIG = {
              "gene_col": "gene",
              "tissue_name": "Skin",
              "cell_name_col": "cluster",
-             "source_type": "Computational",
+             "source_type": "Single-Cell Sequencing",
              "source_info_cols": ["p_val_adj", "avg_log2FC", "pct.1" ,"pct.2"]
          }
      },
     "scar_cell_marker_gse163973": {
+        # Chen et al., Nat Commun 2021 — scRNA-seq atlas of keloid skin (n=16 patients).
+        # Marker genes from Seurat FindAllMarkers; cluster annotations are cell-type labels.
+        # Biological evidence tier: Single-Cell Sequencing (NOT Computational).
         "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE163973_2021_NC_sc_keloid_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
@@ -112,11 +118,14 @@ DATABASE_CONFIG = {
             "gene_col": "gene",
             "tissue_name": "Skin",
             "cell_name_col": "cluster",
-            "source_type": "Computational",
+            "source_type": "Single-Cell Sequencing",
             "source_info_cols": ["p_val_adj", "avg_log2FC", "pct.1" ,"pct.2"]
         }
     },
     "scar_cell_marker_gse138669": {
+        # Theocharidis et al., JID 2022 — scRNA-seq of human skin wound healing.
+        # Marker genes from Seurat FindAllMarkers; captures fibroblast and keratinocyte subsets.
+        # Biological evidence tier: Single-Cell Sequencing (NOT Computational).
         "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE138669_2018_JID_sc_skin_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
@@ -124,11 +133,14 @@ DATABASE_CONFIG = {
             "gene_col": "gene",
             "tissue_name": "Skin",
             "cell_name_col": "cluster",
-            "source_type": "Computational",
+            "source_type": "Single-Cell Sequencing",
             "source_info_cols": ["p_val_adj", "avg_log2FC", "pct.1" ,"pct.2"]
         }
     },
     "scar_cell_marker_gse156326": {
+        # Zhu et al., Nat Commun 2021 — scRNA-seq of hypertrophic scar skin (n=6 patients).
+        # Marker genes from Seurat FindAllMarkers; delineates myofibroblast and macrophage subtypes.
+        # Biological evidence tier: Single-Cell Sequencing (NOT Computational).
         "source": ["", os.path.join(BASE_DATA_DIR, "pre_manually_downloaded_files/GSE156326_2021_NC_sc_hyper_Cell_anno_V2_marker_genes.csv"), "csv"],
         "parser_key": "generic",
         "parser_config": {
@@ -136,7 +148,7 @@ DATABASE_CONFIG = {
             "gene_col": "gene",
             "tissue_name": "Skin",
             "cell_name_col": "cluster",
-            "source_type": "Computational",
+            "source_type": "Single-Cell Sequencing",
             "source_info_cols": ["p_val_adj", "avg_log2FC", "pct.1" ,"pct.2"]
         }
     },

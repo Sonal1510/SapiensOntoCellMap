@@ -75,14 +75,26 @@ class HierarchicalAnnotator:
         return name_to_id
 
     def _build_children_map(self):
-        """Build parent→children relationships from ontology ancestor queries."""
-        # Use the cl_id_to_name map to get all known CL terms
+        """Build parent→children relationships from ontology ancestor queries.
+
+        Obsolete CL terms are excluded from both the child and parent roles.
+        CL retires deprecated cell type concepts (e.g. CL:0000215 'obsolete
+        barrier cell') whose names begin with 'obsolete' in the cl_id_to_name
+        map. Including them would propagate deprecated biology into the ancestor
+        tree and produce misleading broad/intermediate resolution labels.
+        """
         for cl_id in self.cl_id_to_name:
+            # Skip obsolete CL terms as children
+            if self.cl_id_to_name.get(cl_id, '').lower().startswith('obsolete'):
+                continue
             ancestors = self._get_ancestors(cl_id)
             if ancestors:
                 # Direct parents (distance=1)
                 for anc_id, dist in ancestors.items():
                     if dist == 1:
+                        # Skip obsolete CL terms as parents
+                        if self.cl_id_to_name.get(anc_id, '').lower().startswith('obsolete'):
+                            continue
                         self._children_map[anc_id].add(cl_id)
 
     def _get_ancestors(self, cl_id):
@@ -178,8 +190,13 @@ class HierarchicalAnnotator:
             for anc_id, dist in ancestors.items():
                 if anc_id == cl_id:
                     continue
-                # Skip very generic terms
+                # Skip very generic root terms
                 if anc_id in ('CL:0000000', 'CL:0000001'):
+                    continue
+                # Skip obsolete CL terms — retired concepts should not appear
+                # as resolution levels in annotations (e.g. CL:0000493
+                # 'obsolete regulatory T cell', CL:0000215 'obsolete barrier cell').
+                if self.cl_id_to_name.get(anc_id, '').lower().startswith('obsolete'):
                     continue
                 ancestor_evidence[anc_id]['supporting_ids'].add(cl_id)
                 ancestor_evidence[anc_id]['supporting_names'].add(cell_name)
