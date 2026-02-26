@@ -470,16 +470,7 @@ SapiensOntoCellMap mitigates this through:
   refresh `hgnc_complete_set.txt` before each major analysis run.
 
 ### Long-term (architectural)
-- **PanglaoDB is frozen at 2020.** It should be supplemented — not replaced — with
-  newer pan-human sources (e.g., future CellxGene Census snapshots).
-- **LLM-assisted database ingestion** is planned: Claude API reads PubMed abstracts
-  for a tissue of interest, extracts marker–cell-type pairs, and submits them as
-  `source_type: "Computational"` (weight 0.5) via GenericFileParser. This would
-  allow near-real-time incorporation of published findings.
-
-### What NOT to do
-- Do not hard-code gene lists inside Python source files. Any gene set should
-  live in a downloadable file with a versioned URL, registered in `config.py`.
-- Do not silently change `source_type` without documenting the biological rationale.
-  The evidence tier directly affects enrichment scores and therefore all
-  downstream annotations.
+- **PanglaoDB is frozen at 2020.** CellxGene Census (Section 2.3) already supplements
+  it with a continuously updated pan-human source (~60M cells, updated quarterly).
+  Additional pan-human atlases can be added via the Case A workflow (Section 4)
+  as new resources are published.

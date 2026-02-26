@@ -234,25 +234,7 @@ Expected output includes per-database row counts and summary statistics:
   RESULT: SUCCESS
 ```
 
-### 2. Benchmark (PBMC3k, requires internet + ~5 min first run)
-
-```bash
-# Install benchmark dependencies (one-time)
-pip install scanpy celltypist
-
-# Run full benchmark: SapiensOntoCellMap vs CellTypist on PBMC3k
-python3 benchmarking/benchmark_pbmc3k.py
-
-# Re-run using cached DEGs (skip AnnData download)
-python3 benchmarking/benchmark_pbmc3k.py --deg_csv benchmarking/results/pbmc3k_degs.csv
-
-# Skip CellTypist comparison
-python3 benchmarking/benchmark_pbmc3k.py --no_celltypist
-```
-
-Outputs: `benchmarking/results/benchmark_summary.txt`, per-cluster CSV, and 3 publication figures.
-
-### 3. Annotate a sample (end-to-end test)
+### 2. Annotate a sample (end-to-end test)
 
 ```bash
 # scRNA-seq — marker_db and hgnc_map auto-resolved from config/config.py
@@ -287,38 +269,6 @@ python3 src/cluster_annotation/get_cluster_annotation.py \
 | scRNA-seq (10x Flex) | Seurat `FindAllMarkers` CSV | — |
 | Visium HD | Space Ranger `outs/` | MEX (`filtered_feature_bc_matrix/`) |
 | Xenium | Xenium Ranger `outs/` | HDF5 (`cell_feature_matrix.h5`) |
-
----
-
-## Benchmarking
-
-### PBMC3k (Zheng et al. 2017, n=2,638 cells, 8 cell types)
-
-Standard scRNA-seq annotation benchmark comparing SapiensOntoCellMap vs. CellTypist (`Immune_All_High` model):
-
-| Tool | Top-1 Accuracy | Hierarchical Accuracy |
-|------|---------------|----------------------|
-| **SapiensOntoCellMap** | **100%** | **100%** |
-| CellTypist (Immune_All_High) | 62.5% | — |
-
-Per-cluster annotations (SapiensOntoCellMap):
-
-| Ground Truth | Predicted Cell Type | Match |
-|-------------|--------------------|----|
-| CD4 T cells | naive thymus-derived CD4-positive, alpha-beta T cell | ✅ |
-| CD14+ Monocytes | CD14-positive monocyte | ✅ |
-| B cells | B-2 B cell | ✅ |
-| CD8 T cells | effector CD8-positive, alpha-beta T cell | ✅ |
-| NK cells | CD16-positive, CD56-dim natural killer cell, human | ✅ |
-| FCGR3A+ Monocytes | non-classical monocyte | ✅ |
-| Dendritic cells | myeloid dendritic cell, human | ✅ |
-| Megakaryocytes | platelet | ✅ |
-
-Reproduce:
-```bash
-pip install scanpy celltypist
-python3 benchmarking/benchmark_pbmc3k.py
-```
 
 ---
 
