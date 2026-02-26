@@ -1,19 +1,25 @@
 """
-SapiensOntoCellMap — Integration Test Suite
-============================================
-Runs the full database build pipeline (download → parse → combine → validate)
-and prints a validation summary with row counts and quality metrics.
+SapiensOntoCellMap — Marker Database Build Script
+==================================================
+Downloads, parses, combines, and validates all 14 source databases into
+the master marker database used by the annotation engine.
 
 Usage
 -----
-  # Full pipeline (download + build + validate)
-  python3 test/test_classes.py
+  # Full pipeline: download all sources + build + validate
+  python3 scripts/build_marker_db.py
 
-  # Skip download (re-use cached raw files)
-  python3 test/test_classes.py --skip_download
+  # Skip download — re-use cached raw files (faster re-build)
+  python3 scripts/build_marker_db.py --skip_download
 
-  # Build only (no download)
-  python3 test/test_classes.py --build_only
+  # Build + validate only (same as --skip_download)
+  python3 scripts/build_marker_db.py --build_only
+
+Output
+------
+  data/processed_combined_db/master_cell_marker_db.csv  — 442K+ row master DB
+  data/reference/hgnc_complete_set.txt                   — HGNC gene alias map
+  data/processed_combined_db/quarantine_log.csv          — rejected rows
 """
 import argparse
 import logging
@@ -37,12 +43,12 @@ try:
     )
 except ImportError as e:
     logger.error(f"Import error: {e}")
-    logger.error("Run from the project root: python3 test/test_classes.py")
+    logger.error("Run from the project root: python3 scripts/build_marker_db.py")
     sys.exit(1)
 
 
 def run_downloader():
-    """Download all 14 source databases + HGNC reference."""
+    """Download all 14 source databases + HGNC + MSigDB reference files."""
     logger.info("=== Step 1: Downloading databases ===")
     downloader = BioDataDownloader()
     downloader.download_all_databases()
@@ -106,7 +112,11 @@ def run_build_and_validate():
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="SapiensOntoCellMap integration tests")
+    p = argparse.ArgumentParser(
+        description="SapiensOntoCellMap — build the master marker database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
     p.add_argument("--skip_download", action="store_true",
                    help="Skip download step (use cached raw files)")
     p.add_argument("--build_only", action="store_true",

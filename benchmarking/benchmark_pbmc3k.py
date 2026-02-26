@@ -721,7 +721,7 @@ def main():
 
     if not os.path.exists(MARKER_DB):
         logger.error(f"Marker DB not found: {MARKER_DB}")
-        logger.error("Run test/test_classes.py to build the database first.")
+        logger.error("Run scripts/build_marker_db.py to build the database first.")
         sys.exit(1)
 
     # ---- Step 1-2: Data prep -------------------------------------------------

@@ -76,10 +76,10 @@ Download and parse all 14 source databases (~10–20 minutes, internet required)
 
 ```bash
 # Full pipeline: download + build + validate
-python3 test/test_classes.py
+python3 scripts/build_marker_db.py
 
 # Re-build from cached raw files (skip download)
-python3 test/test_classes.py --skip_download
+python3 scripts/build_marker_db.py --skip_download
 ```
 
 This creates:
@@ -87,7 +87,7 @@ This creates:
 - `data/reference/hgnc_complete_set.txt` — HGNC gene alias map
 - `data/processed_combined_db/quarantine_log.csv` — schema violation log
 
-The test prints a validation summary with row counts, ontology coverage, and per-database statistics.
+The script prints a validation summary with row counts, ontology coverage, and per-database statistics.
 
 ---
 
@@ -146,7 +146,7 @@ The UMAP and cluster assignments are auto-detected from the Space Ranger output 
 | `--no_deconvolution` | — | Disable the Cell Type Composition tab in the HTML report |
 | `--no_auto_spatial_filter` | — | Disable auto-calibration of mean_counts threshold |
 
-¹ Defaults to the path in `config/config.py` (`PROCESSED_COMBINED_DATABASE_FILE` and `HGNC_COMPLETE_SET_FILE`). These are set automatically after running `python3 test/test_classes.py`.
+¹ Defaults to the path in `config/config.py` (`PROCESSED_COMBINED_DATABASE_FILE` and `HGNC_COMPLETE_SET_FILE`). These are set automatically after running `python3 scripts/build_marker_db.py`.
 
 ---
 
@@ -205,8 +205,8 @@ SapiensOntoCellMap/
 │   │   └── nnls_deconvolver.py          # NNLS solver (not used in current pipeline)
 │   └── visualization/               # Interactive database explorer
 │       └── db_process.py                # CSV → JSON → sapiens_visualizer.html
-├── test/
-│   └── test_classes.py              # Full pipeline integration test (downloads + builds DB)
+├── scripts/
+│   └── build_marker_db.py           # Download + build + validate the marker database
 ├── pyproject.toml                   # Package metadata and dependencies
 └── requirements.txt                 # Pinned environment snapshot
 ```
@@ -215,14 +215,14 @@ SapiensOntoCellMap/
 
 ## Testing
 
-### 1. Build the database (integration test)
+### 1. Build the database
 
 ```bash
 # Full: download all 14 databases + HGNC + build + validate
-python3 test/test_classes.py
+python3 scripts/build_marker_db.py
 
 # Re-build only (cached raw files already present)
-python3 test/test_classes.py --skip_download
+python3 scripts/build_marker_db.py --skip_download
 ```
 
 Expected output includes per-database row counts and summary statistics:
@@ -257,7 +257,7 @@ python3 src/cluster_annotation/get_cluster_annotation.py \
 
 1. Add an entry to `DATABASE_CONFIG` in `config/config.py`
 2. Use `GenericFileParser` (`parser_key: "generic"`) when possible
-3. Run `python3 test/test_classes.py` to rebuild
+3. Run `python3 scripts/build_marker_db.py` to rebuild
 4. Check `data/processed_combined_db/quarantine_log.csv` for any rejected rows
 
 ---

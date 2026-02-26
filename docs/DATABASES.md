@@ -316,7 +316,7 @@ Place it in `data/pre_manually_downloaded_files/` (manual) or use a direct URL
 **Step 3 — Rebuild the master database**
 
 ```bash
-python3 test/test_classes.py
+python3 scripts/build_marker_db.py
 ```
 
 This downloads the file (if URL provided), parses it, runs
