@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """
-SapiensOntoCellMap Benchmarking — PBMC3k
-==========================================
+SapiensOntoCellMap Benchmarking — Tabula Sapiens
+==================================================
 Author : Sonal Rashmi
 Date   : 2026-02-25
 
-Standard benchmark: Zheng et al. 2017, 2,638 PBMCs, 8 cell types.
-Compares SapiensOntoCellMap against CellTypist, scType (R), and SingleR (R).
+Benchmark on skin and blood subsets of the Tabula Sapiens atlas.
+Reference: The Tabula Sapiens Consortium, Science 2022 (doi:10.1126/science.abl4896)
+
+Requires:
+  pip install cellxgene-census scanpy celltypist
 
 Usage
 -----
-  # Full pipeline (scanpy + celltypist required)
-  python benchmarking/benchmark_pbmc3k.py
+  python benchmarking/benchmark_tabula_sapiens.py
 
-  # Use pre-computed Seurat FindAllMarkers CSV
-  python benchmarking/benchmark_pbmc3k.py --deg_csv path/to/markers.csv --deg_format seurat
+  # Skip download (use cached h5ad)
+  python benchmarking/benchmark_tabula_sapiens.py --skip_download
 
-  # Skip CellTypist
-  python benchmarking/benchmark_pbmc3k.py --no_celltypist
-
-  # Skip download step (data already cached)
-  python benchmarking/benchmark_pbmc3k.py --skip_download
+  # Skip R tools
+  python benchmarking/benchmark_tabula_sapiens.py --no_r_tools
 """
 
 import argparse
@@ -41,9 +40,9 @@ from benchmarking.annotation_tool_exec.celltypist_runner import CellTypistRunner
 from benchmarking.annotation_tool_exec.sapiensonto_runner import SapiensOntoRunner
 from benchmarking.annotation_tool_exec.sctype_runner import ScTypeRunner
 from benchmarking.annotation_tool_exec.singler_runner import SingleRRunner
-from benchmarking.download.datasets.pbmc3k_downloader import PBMC3kDownloader
+from benchmarking.download.datasets.tabula_sapiens_downloader import TabulaSapiensDownloader
 from benchmarking.figures.benchmark_figures import BenchmarkFigures
-from benchmarking.ground_truth.pbmc3k_gt import GT_ALIASES, PBMC3K_GROUND_TRUTH
+from benchmarking.ground_truth.tabula_sapiens_gt import TABULA_SAPIENS_GROUND_TRUTH
 from benchmarking.metrics.benchmark_metrics import BenchmarkMetrics
 
 try:
@@ -54,18 +53,18 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# DEG computation (PBMC3k-specific: Wilcoxon one-vs-rest, Scanpy format)
+# DEG computation (Tabula Sapiens: Wilcoxon on cell_type obs column)
 # ---------------------------------------------------------------------------
 
-def compute_degs(adata, output_dir: str) -> str:
+def compute_degs(adata, output_dir: str, groupby: str = "cell_type") -> str:
     """
-    Run Wilcoxon rank-sum test per Louvain cluster and export in Scanpy CSV format.
+    Run Wilcoxon rank-sum test per cell type and export in Scanpy CSV format.
     Returns path to the saved DEG CSV. Idempotent — skips if already present.
     """
     try:
         import scanpy as sc
     except ImportError:
-        logger.error("scanpy required for DEG computation. pip install scanpy")
+        logger.error("scanpy required. pip install scanpy")
         sys.exit(1)
 
     deg_path = os.path.join(output_dir, "degs.csv")
@@ -73,13 +72,13 @@ def compute_degs(adata, output_dir: str) -> str:
         logger.info(f"Using cached DEG file: {deg_path}")
         return deg_path
 
-    logger.info("Computing Wilcoxon DEGs per Louvain cluster (one-vs-rest)...")
+    logger.info(f"Computing Wilcoxon DEGs grouped by '{groupby}'...")
     sc.tl.rank_genes_groups(
         adata,
-        groupby="louvain",
+        groupby=groupby,
         method="wilcoxon",
-        n_genes=adata.raw.var.shape[0] if adata.raw is not None else adata.n_vars,
-        use_raw=True,
+        n_genes=min(200, adata.n_vars),
+        use_raw=False,
     )
     records = []
     groups = adata.uns["rank_genes_groups"]["names"].dtype.names
@@ -100,37 +99,18 @@ def compute_degs(adata, output_dir: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Main benchmark function (callable from run_all_benchmarks.py)
+# Main benchmark function
 # ---------------------------------------------------------------------------
 
-def run_pbmc3k_benchmark(
+def run_tabula_sapiens_benchmark(
     output_dir: str,
     skip_download: bool = False,
-    deg_csv: str | None = None,
-    deg_format: str = "scanpy",
     background_n: int = 20000,
     no_celltypist: bool = False,
     no_r_tools: bool = False,
 ) -> pd.DataFrame:
     """
-    Run the full PBMC3k benchmark.
-
-    Parameters
-    ----------
-    output_dir : str
-        All outputs are written here (subdirectories per tool).
-    skip_download : bool
-        Use cached h5ad if already present.
-    deg_csv : str, optional
-        Pre-computed DEG CSV. If None, DEGs are computed from the h5ad.
-    deg_format : str
-        DEG CSV format — 'scanpy' or 'seurat'.
-    background_n : int
-        Background gene count for hypergeometric test.
-    no_celltypist : bool
-        Skip CellTypist.
-    no_r_tools : bool
-        Skip scType and SingleR (R required).
+    Run the full Tabula Sapiens (skin + blood) benchmark.
 
     Returns
     -------
@@ -144,35 +124,28 @@ def run_pbmc3k_benchmark(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. Download / load PBMC3k
-    if deg_csv and os.path.exists(deg_csv):
-        logger.info(f"Using provided DEG CSV: {deg_csv}")
-        adata = None
-    else:
-        downloader = PBMC3kDownloader(output_dir=output_dir)
-        h5ad_path = str(downloader.download(force=False))
-        try:
-            import scanpy as sc
-            adata = sc.read_h5ad(h5ad_path)
-        except ImportError:
-            logger.error("scanpy required. pip install scanpy")
-            sys.exit(1)
-        deg_csv = compute_degs(adata, output_dir)
+    # 1. Download / load Tabula Sapiens subset
+    downloader = TabulaSapiensDownloader(output_dir=output_dir)
+    h5ad_path = str(downloader.download(force=False))
 
-    # 2. Run all annotation tools
-    metrics = BenchmarkMetrics(
-        ground_truth=PBMC3K_GROUND_TRUTH,
-        gt_aliases=GT_ALIASES,
-    )
-    h5ad_path = os.path.join(output_dir, "pbmc3k_processed.h5ad")
+    try:
+        import scanpy as sc
+        adata = sc.read_h5ad(h5ad_path)
+    except ImportError:
+        logger.error("scanpy required. pip install scanpy")
+        sys.exit(1)
+
+    deg_csv = compute_degs(adata, output_dir, groupby="cell_type")
+
+    # 2. Run annotation tools
+    metrics = BenchmarkMetrics(ground_truth=TABULA_SAPIENS_GROUND_TRUTH)
 
     # SapiensOntoCellMap
     sapiensonto = SapiensOntoRunner()
     predictions = sapiensonto.run(
         deg_csv, output_dir,
-        sample_name="pbmc3k_benchmark",
+        sample_name="tabula_sapiens_benchmark",
         background_n=background_n,
-        deg_format=deg_format,
     )
     metrics.add_predictions("SapiensOntoCellMap", predictions)
 
@@ -182,15 +155,15 @@ def run_pbmc3k_benchmark(
         ct_preds = celltypist.run(
             deg_csv, output_dir,
             adata_path=h5ad_path,
-            model_name="Immune_All_High",
-            cluster_key="louvain",
+            model_name="Healthy_COVID19_PBMC",  # broad immune model
+            cluster_key="cell_type",
         )
         metrics.add_predictions("CellTypist", ct_preds)
 
     # scType (R)
     if not no_r_tools:
         sctype = ScTypeRunner()
-        st_preds = sctype.run(deg_csv, output_dir, tissue_type="Immune system")
+        st_preds = sctype.run(deg_csv, output_dir, tissue_type="Skin")
         if st_preds:
             metrics.add_predictions("scType", st_preds)
 
@@ -201,12 +174,12 @@ def run_pbmc3k_benchmark(
             deg_csv, output_dir,
             adata_path=h5ad_path,
             reference="HumanPrimaryCellAtlasData",
-            cluster_key="louvain",
+            cluster_key="cell_type",
         )
         if sr_preds:
             metrics.add_predictions("SingleR", sr_preds)
 
-    # 3. Compute and save metrics
+    # 3. Save metrics
     summary = metrics.summary()
     detail_df = metrics.to_dataframe()
 
@@ -218,10 +191,9 @@ def run_pbmc3k_benchmark(
 
     # 4. Generate figures
     figs = BenchmarkFigures(output_dir=os.path.join(output_dir, "figures"))
-    figs.plot_accuracy_bar(summary, dataset_name="PBMC3k", metric="top1_accuracy")
-    figs.plot_accuracy_bar(summary, dataset_name="PBMC3k", metric="broad_accuracy")
+    figs.plot_accuracy_bar(summary, dataset_name="Tabula Sapiens", metric="top1_accuracy")
 
-    print("\n=== PBMC3k Benchmark Summary ===")
+    print("\n=== Tabula Sapiens Benchmark Summary ===")
     print(summary.to_string(index=False))
     return summary
 
@@ -232,35 +204,27 @@ def run_pbmc3k_benchmark(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="SapiensOntoCellMap — PBMC3k benchmark",
+        description="SapiensOntoCellMap — Tabula Sapiens benchmark",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--deg_csv", default=None,
-                   help="Pre-computed DEG CSV (skip data download + DEG step)")
-    p.add_argument("--deg_format", default="scanpy", choices=["scanpy", "seurat"],
-                   help="DEG CSV format (default: scanpy)")
-    p.add_argument("--background_n", type=int, default=20000,
-                   help="Background gene count for hypergeometric test (default: 20000)")
-    p.add_argument("--no_celltypist", action="store_true",
-                   help="Skip CellTypist")
-    p.add_argument("--no_r_tools", action="store_true",
-                   help="Skip scType and SingleR (R required)")
     p.add_argument("--skip_download", action="store_true",
                    help="Use cached h5ad if present")
+    p.add_argument("--background_n", type=int, default=20000)
+    p.add_argument("--no_celltypist", action="store_true")
+    p.add_argument("--no_r_tools", action="store_true",
+                   help="Skip scType and SingleR")
     p.add_argument("--output_dir",
-                   default=os.path.join(_BENCH_DIR, "results", "pbmc3k"),
-                   help="Output directory (default: benchmarking/results/pbmc3k/)")
+                   default=os.path.join(_BENCH_DIR, "results", "tabula_sapiens"),
+                   help="Output directory")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run_pbmc3k_benchmark(
+    run_tabula_sapiens_benchmark(
         output_dir=args.output_dir,
         skip_download=args.skip_download,
-        deg_csv=args.deg_csv,
-        deg_format=args.deg_format,
         background_n=args.background_n,
         no_celltypist=args.no_celltypist,
         no_r_tools=args.no_r_tools,
