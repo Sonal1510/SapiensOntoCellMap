@@ -387,7 +387,12 @@ class HierarchicalAnnotator:
                     )
                     return lineage_broad.iloc[0]['Cell_Type']
 
+            # CL ID unmapped or no confident lineage ancestors — do not fall back
+            # to an unrelated cell type's ancestor tree when a specific top type was given.
+            return None
+
         # --- Fallback: shallowest confident ancestor across all results ---
+        # Only reached when top_cell_type is None (unconstrained call).
         broadest = broad.loc[broad['Depth'].idxmin()]
         return broadest['Cell_Type']
 
