@@ -913,11 +913,11 @@ def main():
              f"(default: {_DEFAULT_MARKER_DB or 'REQUIRED — config path not found'})")
     parser.add_argument("--tissue", type=str, default=None, help="Filter marker DB for tissue")
     parser.add_argument("--min_overlap", type=int, default=2, help="Minimum gene overlap count to report (default: 2)")
-    parser.add_argument("--min_db_markers", type=int, default=10,
+    parser.add_argument("--min_db_markers", type=int, default=5,
         help="Minimum number of database marker genes a cell type must have (after background "
              "intersection) to be tested. Prevents rare cell types with tiny reference sets from "
              "inflating Weighted_Enrichment and winning Combined_Score. "
-             "(default: 10; set 0 to disable)")
+             "(default: 5; recommended: 5 for spatial, 0 to disable)")
     parser.add_argument("--min_cluster_degs", type=int, default=0,
         help="Minimum cluster DEG count required to compute Weighted Enrichment. "
              "Clusters with fewer DEGs fall back to unweighted scoring, avoiding N/n inflation. "
