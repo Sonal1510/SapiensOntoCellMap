@@ -390,3 +390,31 @@ class HierarchicalAnnotator:
         # --- Fallback: shallowest confident ancestor across all results ---
         broadest = broad.loc[broad['Depth'].idxmin()]
         return broadest['Cell_Type']
+
+    def get_broad_type_with_consensus(self, cluster_annotations_df, cluster_id,
+                                      top_cell_type=None, runner_up_cell_type=None):
+        """
+        Get broad type plus a consensus flag checking whether the runner-up
+        annotation agrees on the same broad lineage.
+
+        Args:
+            cluster_annotations_df: Output of annotate_all_clusters
+            cluster_id: e.g., 'Cluster 0'
+            top_cell_type: Winner cell type name (constrains ancestor search)
+            runner_up_cell_type: Second-ranked cell type name (consensus check)
+
+        Returns:
+            dict: {'Broad_Type': str or None, 'Broad_Type_Consensus': bool or None}
+        """
+        broad_type = self.get_broad_type(
+            cluster_annotations_df, cluster_id, top_cell_type=top_cell_type
+        )
+
+        if not broad_type or not runner_up_cell_type:
+            return {'Broad_Type': broad_type, 'Broad_Type_Consensus': broad_type is not None}
+
+        runner_broad = self.get_broad_type(
+            cluster_annotations_df, cluster_id, top_cell_type=runner_up_cell_type
+        )
+        consensus = runner_broad is not None and runner_broad == broad_type
+        return {'Broad_Type': broad_type, 'Broad_Type_Consensus': consensus}

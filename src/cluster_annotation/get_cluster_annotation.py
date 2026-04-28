@@ -339,6 +339,8 @@ def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_database
         mean_counts_thresh=args.mean,
         top_genes=args.topgenes,
         min_overlap=args.min_overlap,
+        min_db_markers=getattr(args, 'min_db_markers', 0),
+        min_cluster_degs=getattr(args, 'min_cluster_degs', 0),
         background_gene_count=args.background_gene_count,
         hgnc_map=getattr(args, 'hgnc_map', None),
         deg_format=getattr(args, 'deg_format', None),
@@ -413,33 +415,36 @@ def run_enrichment_pipeline(deg_file, marker_db_dict, args, deg_type, n_database
 
     return pipeline, all_results, sig_results, plots_html, analysis_params
 
-def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tissue_specified, hierarchical_annotator=None):
+def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tissue_specified,
+                                    hierarchical_annotator=None, tissue_priority_ratio=0.0):
     """
     Generates a CSV with the top 1 annotation per cluster.
-    Priority: Selected Tissue (Level 2) > All Tissue (Level 2).
 
-    Enhanced with:
-    - Confidence: from hierarchical engine
-    - Broad_Type: parent cell type from CL ontology
-    - N_Databases: how many databases support this annotation
+    Priority logic: Selected Tissue (Level 2) > All Tissue (Level 2), with
+    score-gated fallback — if selected_tissue Combined_Score <
+    tissue_priority_ratio * all_tissue Combined_Score, all_tissue wins.
+
+    New output columns vs. prior version:
+    - Runner_Up_Cell_Type / Score_Gap : annotation uncertainty signal
+    - Broad_Type_Consensus            : True if runner-up agrees on Broad_Type lineage
+    - Proliferating_Lineage           : Broad_Type + '_proliferating' when flag is True
+    - Lineage_Conflict                : True if Top_Cell_Type is not a CL descendant of Broad_Type
     """
     summary_data = []
     all_clusters = set()
 
-    # Gather clusters from any context that produced results
-    def get_clusters_from_ctx(ctx, lvl):
+    def _get_clusters_from_ctx(ctx, lvl):
         if ctx in final_sig_results and lvl in final_sig_results[ctx]:
             df = final_sig_results[ctx][lvl]
             if isinstance(df, pd.DataFrame) and not df.empty and 'Cluster' in df.columns:
                 return set(df['Cluster'].unique())
         return set()
 
-    all_clusters.update(get_clusters_from_ctx('selected_tissue', 'level2'))
-    all_clusters.update(get_clusters_from_ctx('all_tissue', 'level2'))
+    all_clusters.update(_get_clusters_from_ctx('selected_tissue', 'level2'))
+    all_clusters.update(_get_clusters_from_ctx('all_tissue', 'level2'))
 
     sorted_clusters = sorted(list(all_clusters), key=natural_sort_key)
 
-    # Collect hierarchical results for confidence/broad_type lookup
     hier_results = {}
     for ctx_name in ['selected_tissue', 'all_tissue']:
         if ctx_name in final_sig_results:
@@ -447,149 +452,189 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
             if isinstance(h, pd.DataFrame) and not h.empty:
                 hier_results[ctx_name] = h
 
+    def _sort_cluster_results(cluster_res):
+        if cluster_res.empty:
+            return cluster_res
+        if 'Combined_Score' in cluster_res.columns and cluster_res['Combined_Score'].notna().any():
+            return cluster_res.sort_values('Combined_Score', ascending=False, na_position='last')
+        elif 'Weighted_Enrichment' in cluster_res.columns:
+            return cluster_res.sort_values(
+                ['adj_p_value', 'Weighted_Enrichment'], ascending=[True, False]
+            )
+        return cluster_res.sort_values(
+            ['adj_p_value', 'Enrichment_ratio'], ascending=[True, False]
+        )
+
+    def _extract_top_rows(ctx_name, cluster):
+        """Return (top_row, runner_up_row) from a context's level2 df, or (None, None)."""
+        df = final_sig_results.get(ctx_name, {}).get('level2')
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return None, None
+        cluster_res = df[df['Cluster'] == cluster]
+        if cluster_res.empty:
+            return None, None
+        cluster_res = _sort_cluster_results(cluster_res)
+        top = cluster_res.iloc[0]
+        runner = cluster_res.iloc[1] if len(cluster_res) > 1 else None
+        return top, runner
+
+    def _row_score(row):
+        if row is None:
+            return None
+        cs = row.get('Combined_Score')
+        if cs is not None and not pd.isna(cs):
+            return float(cs)
+        we = row.get('Weighted_Enrichment')
+        if we is not None and not pd.isna(we):
+            return float(we)
+        return float(row.get('Enrichment_ratio', 0) or 0)
+
+    def _build_hit(cluster, top_row, runner_up_row, source_label):
+        score = _row_score(top_row)
+        runner_score = _row_score(runner_up_row)
+        score_gap = (
+            round(score - runner_score, 4)
+            if score is not None and runner_score is not None
+            else None
+        )
+        n_db = (
+            int(top_row['N_Databases'])
+            if 'N_Databases' in top_row.index and pd.notna(top_row.get('N_Databases'))
+            else None
+        )
+        return {
+            'Cluster': cluster,
+            'Top_Cell_Type': top_row['Cell_type'],
+            'Runner_Up_Cell_Type': runner_up_row['Cell_type'] if runner_up_row is not None else None,
+            'Score_Gap': score_gap,
+            'Source': source_label,
+            'P_Value': top_row['adj_p_value'],
+            'Score': score,
+            'Genes': top_row.get('Overlapping_genes', ''),
+            'N_Databases': n_db,
+        }
+
     for cluster in sorted_clusters:
-        selected_hit = None
-        source_ctx = None
+        st_top, st_runner = (
+            _extract_top_rows('selected_tissue', cluster)
+            if tissue_specified else (None, None)
+        )
+        at_top, at_runner = _extract_top_rows('all_tissue', cluster)
 
-        # 1. Try Selected Tissue (Level 2)
-        if tissue_specified and 'selected_tissue' in final_sig_results:
-            df = final_sig_results['selected_tissue'].get('level2')
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                cluster_res = df[df['Cluster'] == cluster]
-                if not cluster_res.empty:
-                    # Use Combined_Score (Weighted_Enrichment × -log10 p) as primary rank:
-                    # rewards specificity and penalises broad terms with many markers.
-                    if 'Combined_Score' in cluster_res.columns:
-                        sort_cols = ['Combined_Score']
-                        asc = [False]
-                    else:
-                        sort_cols = ['adj_p_value']
-                        asc = [True]
-                        if 'Weighted_Enrichment' in cluster_res.columns:
-                            sort_cols.append('Weighted_Enrichment')
-                            asc.append(False)
-                        else:
-                            sort_cols.append('Enrichment_ratio')
-                            asc.append(False)
-
-                    cluster_res = cluster_res.sort_values(by=sort_cols, ascending=asc)
-                    top_row = cluster_res.iloc[0]
-
-                    score = top_row.get('Weighted_Enrichment', top_row.get('Enrichment_ratio'))
-                    n_db = int(top_row['N_Databases']) if 'N_Databases' in top_row.index else None
-                    selected_hit = {
-                        'Cluster': cluster,
-                        'Top_Cell_Type': top_row['Cell_type'],
-                        'Source': 'Selected Tissue',
-                        'P_Value': top_row['adj_p_value'],
-                        'Score': score,
-                        'Genes': top_row.get('Overlapping_genes', ''),
-                        'N_Databases': n_db,
-                    }
-                    source_ctx = 'selected_tissue'
-
-        # 2. If no hit, try All Tissue (Level 2)
-        if selected_hit is None:
-            if 'all_tissue' in final_sig_results:
-                df = final_sig_results['all_tissue'].get('level2')
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    cluster_res = df[df['Cluster'] == cluster]
-                    if not cluster_res.empty:
-                        # Use Combined_Score (Weighted_Enrichment × -log10 p) as primary rank:
-                        # rewards specificity and penalises broad terms with many markers.
-                        if 'Combined_Score' in cluster_res.columns:
-                            sort_cols = ['Combined_Score']
-                            asc = [False]
-                        else:
-                            sort_cols = ['adj_p_value']
-                            asc = [True]
-                            if 'Weighted_Enrichment' in cluster_res.columns:
-                                sort_cols.append('Weighted_Enrichment')
-                                asc.append(False)
-                            else:
-                                sort_cols.append('Enrichment_ratio')
-                                asc.append(False)
-
-                        cluster_res = cluster_res.sort_values(by=sort_cols, ascending=asc)
-                        top_row = cluster_res.iloc[0]
-                        score = top_row.get('Weighted_Enrichment', top_row.get('Enrichment_ratio'))
-                        n_db = int(top_row['N_Databases']) if 'N_Databases' in top_row.index else None
-
-                        selected_hit = {
-                            'Cluster': cluster,
-                            'Top_Cell_Type': top_row['Cell_type'],
-                            'Source': 'All Tissue',
-                            'P_Value': top_row['adj_p_value'],
-                            'Score': score,
-                            'Genes': top_row.get('Overlapping_genes', ''),
-                            'N_Databases': n_db,
-                        }
-                        source_ctx = 'all_tissue'
-
-        if selected_hit:
-            # Add hierarchical context if available
-            confidence = None
-            broad_type = None
-            if source_ctx and source_ctx in hier_results and hierarchical_annotator:
-                hier_df = hier_results[source_ctx]
-                confidence_info = hierarchical_annotator.get_best_resolution(hier_df, cluster)
-                if confidence_info:
-                    confidence = confidence_info.get('Confidence')
-                broad_name = hierarchical_annotator.get_broad_type(
-                    hier_df, cluster,
-                    top_cell_type=selected_hit.get('Top_Cell_Type')
+        # Score-gated tissue priority (Problem 5): fall back to all_tissue when
+        # selected_tissue score is disproportionately weak.
+        use_all_tissue = False
+        if st_top is not None and at_top is not None and tissue_priority_ratio > 0:
+            st_score = _row_score(st_top) or 0
+            at_score = _row_score(at_top) or 0
+            if st_score < tissue_priority_ratio * at_score:
+                use_all_tissue = True
+                logger.info(
+                    f"{cluster}: selected_tissue score {st_score:.2f} < "
+                    f"{tissue_priority_ratio} × all_tissue score {at_score:.2f} — using all_tissue"
                 )
-                if broad_name:
-                    broad_type = broad_name
 
-            selected_hit['Confidence'] = confidence
-            selected_hit['Broad_Type'] = broad_type
-
-            # --- Proliferative Signature Detection ---
-            # Checks whether the overlapping marker genes are dominated by canonical
-            # cell cycle genes (MSigDB HALLMARK_G2M_CHECKPOINT + HALLMARK_G1S_CHECKPOINT;
-            # Liberzon et al., Cell Systems 2015).  In cancer/inflamed tissue, such clusters
-            # may represent cycling or malignant cells rather than the annotated cell type.
-            # Two thresholds are applied:
-            #   (a) ≥3 cycle genes in overlap → unconditional flag
-            #   (b) ≥2 cycle genes AND they represent ≥33 % of total overlap → flag
-            # Requires MSigDB .grp files downloaded via download_reference_data().
-            # If the gene set was not loaded, flag is set to None (not computed).
-            if not PROLIFERATIVE_GENES:
-                selected_hit['Proliferative_Flag'] = None
-                selected_hit['Proliferative_Genes'] = ''
-            else:
-                genes_str = selected_hit.get('Genes', '')
-                if genes_str:
-                    overlap_genes = [g.strip().upper() for g in str(genes_str).split(',') if g.strip()]
-                    prolif_hits = [g for g in overlap_genes if g in PROLIFERATIVE_GENES]
-                    n_prolif = len(prolif_hits)
-                    n_total = len(overlap_genes)
-                    frac_prolif = n_prolif / n_total if n_total > 0 else 0.0
-                    is_prolif = (n_prolif >= _PROLIF_FLAG_MIN_GENES) or \
-                                (n_prolif >= _PROLIF_FLAG_MIN_GENES2 and frac_prolif >= _PROLIF_FLAG_MIN_FRAC)
-                    selected_hit['Proliferative_Flag'] = is_prolif
-                    selected_hit['Proliferative_Genes'] = ', '.join(prolif_hits) if is_prolif else ''
-                else:
-                    selected_hit['Proliferative_Flag'] = False
-                    selected_hit['Proliferative_Genes'] = ''
-
-            summary_data.append(selected_hit)
+        if st_top is not None and not use_all_tissue:
+            selected_hit = _build_hit(cluster, st_top, st_runner, 'Selected Tissue')
+            source_ctx = 'selected_tissue'
+        elif at_top is not None:
+            selected_hit = _build_hit(cluster, at_top, at_runner, 'All Tissue')
+            source_ctx = 'all_tissue'
         else:
             summary_data.append({
                 'Cluster': cluster,
                 'Top_Cell_Type': 'Unannotated',
-                'Source': 'None',
-                'P_Value': None, 'Score': None, 'Genes': '',
-                'Confidence': None, 'Broad_Type': None, 'N_Databases': None,
-                'Proliferative_Flag': False, 'Proliferative_Genes': '',
+                'Runner_Up_Cell_Type': None, 'Score_Gap': None,
+                'Source': 'None', 'P_Value': None, 'Score': None, 'Genes': '',
+                'Confidence': None, 'Broad_Type': None, 'Broad_Type_Consensus': None,
+                'N_Databases': None, 'Proliferative_Flag': False,
+                'Proliferative_Genes': '', 'Proliferating_Lineage': '',
+                'Lineage_Conflict': False,
             })
+            continue
+
+        # Hierarchical context: confidence, broad type, consensus, lineage check
+        confidence = None
+        broad_type = None
+        broad_type_consensus = None
+        lineage_conflict = False
+
+        if source_ctx and source_ctx in hier_results and hierarchical_annotator:
+            hier_df = hier_results[source_ctx]
+            confidence_info = hierarchical_annotator.get_best_resolution(hier_df, cluster)
+            if confidence_info:
+                confidence = confidence_info.get('Confidence')
+
+            broad_result = hierarchical_annotator.get_broad_type_with_consensus(
+                hier_df, cluster,
+                top_cell_type=selected_hit.get('Top_Cell_Type'),
+                runner_up_cell_type=selected_hit.get('Runner_Up_Cell_Type'),
+            )
+            broad_type = broad_result['Broad_Type']
+            broad_type_consensus = broad_result['Broad_Type_Consensus']
+
+            # Lineage conflict: Top_Cell_Type must be a CL descendant of Broad_Type.
+            if broad_type and selected_hit.get('Top_Cell_Type'):
+                top_cl_id = hierarchical_annotator.cell_name_to_id.get(
+                    str(selected_hit['Top_Cell_Type']).strip().upper()
+                )
+                broad_cl_id = hierarchical_annotator.cell_name_to_id.get(
+                    str(broad_type).strip().upper()
+                )
+                if top_cl_id and broad_cl_id and top_cl_id != broad_cl_id:
+                    top_ancestors = hierarchical_annotator._get_ancestors(top_cl_id)
+                    lineage_conflict = broad_cl_id not in top_ancestors
+
+        selected_hit['Confidence'] = confidence
+        selected_hit['Broad_Type'] = broad_type
+        selected_hit['Broad_Type_Consensus'] = broad_type_consensus
+        selected_hit['Lineage_Conflict'] = lineage_conflict
+
+        # --- Proliferative Signature Detection ---
+        # Checks whether the overlapping marker genes are dominated by canonical
+        # cell cycle genes (MSigDB HALLMARK_G2M_CHECKPOINT + HALLMARK_G1S_CHECKPOINT;
+        # Liberzon et al., Cell Systems 2015).  In cancer/inflamed tissue, such clusters
+        # may represent cycling or malignant cells rather than the annotated cell type.
+        # Two thresholds are applied:
+        #   (a) ≥3 cycle genes in overlap → unconditional flag
+        #   (b) ≥2 cycle genes AND they represent ≥33 % of total overlap → flag
+        # Requires MSigDB .grp files downloaded via download_reference_data().
+        # If the gene set was not loaded, flag is set to None (not computed).
+        if not PROLIFERATIVE_GENES:
+            selected_hit['Proliferative_Flag'] = None
+            selected_hit['Proliferative_Genes'] = ''
+            selected_hit['Proliferating_Lineage'] = ''
+        else:
+            genes_str = selected_hit.get('Genes', '')
+            if genes_str:
+                overlap_genes = [g.strip().upper() for g in str(genes_str).split(',') if g.strip()]
+                prolif_hits = [g for g in overlap_genes if g in PROLIFERATIVE_GENES]
+                n_prolif = len(prolif_hits)
+                n_total = len(overlap_genes)
+                frac_prolif = n_prolif / n_total if n_total > 0 else 0.0
+                is_prolif = (n_prolif >= _PROLIF_FLAG_MIN_GENES) or \
+                            (n_prolif >= _PROLIF_FLAG_MIN_GENES2 and frac_prolif >= _PROLIF_FLAG_MIN_FRAC)
+                selected_hit['Proliferative_Flag'] = is_prolif
+                selected_hit['Proliferative_Genes'] = ', '.join(prolif_hits) if is_prolif else ''
+                selected_hit['Proliferating_Lineage'] = (
+                    f"{broad_type}_proliferating" if is_prolif and broad_type else ''
+                )
+            else:
+                selected_hit['Proliferative_Flag'] = False
+                selected_hit['Proliferative_Genes'] = ''
+                selected_hit['Proliferating_Lineage'] = ''
+
+        summary_data.append(selected_hit)
 
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
-        col_order = ['Cluster', 'Top_Cell_Type', 'Source', 'P_Value', 'Score',
-                      'Genes', 'Confidence', 'Broad_Type', 'N_Databases',
-                      'Proliferative_Flag', 'Proliferative_Genes']
+        col_order = [
+            'Cluster', 'Top_Cell_Type', 'Runner_Up_Cell_Type', 'Score_Gap',
+            'Source', 'P_Value', 'Score', 'Genes', 'Confidence',
+            'Broad_Type', 'Broad_Type_Consensus', 'N_Databases',
+            'Proliferative_Flag', 'Proliferative_Genes',
+            'Proliferating_Lineage', 'Lineage_Conflict',
+        ]
         summary_df = summary_df[[c for c in col_order if c in summary_df.columns]]
         out_path = os.path.join(output_dir, f"{job_name}_top_annotation_summary.csv")
         summary_df.to_csv(out_path, index=False)
@@ -857,7 +902,9 @@ def main():
     parser.add_argument("output_dir", help="Directory to store output reports")
     parser.add_argument("--deg_type", choices=["spatial", "scrna"], required=True)
     parser.add_argument("--pval", type=float, default=0.05, help="Adj p-value threshold")
-    parser.add_argument("--log2fc", type=float, default=1.0, help="Log2FC threshold")
+    parser.add_argument("--log2fc", type=float, default=1.0,
+        help="Log2FC threshold (default: 1.0). For spatial data at 8 µm resolution, "
+             "consider 0.5 — immune markers are attenuated when bins contain mixed cell types.")
     parser.add_argument("--mean", type=float, default=0.0, help="Mean count threshold")
     parser.add_argument("--topgenes", type=int, default=None, help="Top N genes")
     parser.add_argument("--marker_db", type=str, default=_DEFAULT_MARKER_DB,
@@ -866,6 +913,19 @@ def main():
              f"(default: {_DEFAULT_MARKER_DB or 'REQUIRED — config path not found'})")
     parser.add_argument("--tissue", type=str, default=None, help="Filter marker DB for tissue")
     parser.add_argument("--min_overlap", type=int, default=2, help="Minimum gene overlap count to report (default: 2)")
+    parser.add_argument("--min_db_markers", type=int, default=10,
+        help="Minimum number of database marker genes a cell type must have (after background "
+             "intersection) to be tested. Prevents rare cell types with tiny reference sets from "
+             "inflating Weighted_Enrichment and winning Combined_Score. "
+             "(default: 10; set 0 to disable)")
+    parser.add_argument("--min_cluster_degs", type=int, default=0,
+        help="Minimum cluster DEG count required to compute Weighted Enrichment. "
+             "Clusters with fewer DEGs fall back to unweighted scoring, avoiding N/n inflation. "
+             "(default: 0 = no filter; recommended: 10 for spatial data)")
+    parser.add_argument("--tissue_priority_ratio", type=float, default=0.0,
+        help="Score-gated tissue priority: if selected_tissue Combined_Score < ratio × "
+             "all_tissue Combined_Score, fall back to all_tissue annotation. "
+             "(default: 0.0 = hard priority; recommended: 0.3)")
     parser.add_argument("--background_gene_count", type=int, default=None, help="Override background gene count N for hypergeometric test")
     parser.add_argument("--hgnc_map", type=str, default=_DEFAULT_HGNC_MAP,
         help="Path to HGNC complete set file for gene alias resolution "
@@ -991,6 +1051,7 @@ def main():
                 job_name=job_name,
                 tissue_specified=tissue_specified,
                 hierarchical_annotator=hierarchical_annotator,
+                tissue_priority_ratio=getattr(args, 'tissue_priority_ratio', 0.0),
             )
 
             # --- Load UMAP data (auto-detect for spatial, CLI args for scRNA) ---
