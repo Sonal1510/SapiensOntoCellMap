@@ -136,6 +136,8 @@ class MarkerEnrichmentTest:
         mean_counts_thresh=0,
         top_genes=None,
         min_overlap=2,
+        min_db_markers=0,
+        min_cluster_degs=0,
         background_gene_count=None,
         hgnc_map=None,
         deg_format=None,
@@ -193,6 +195,8 @@ class MarkerEnrichmentTest:
         self.mean_counts_thresh = mean_counts_thresh
         self.top_genes = top_genes
         self.min_overlap = min_overlap
+        self.min_db_markers = min_db_markers
+        self.min_cluster_degs = min_cluster_degs
         self.N_override = background_gene_count
         self.deg_format = deg_format
         self.auto_spatial_mean_filter = auto_spatial_mean_filter
@@ -372,11 +376,22 @@ class MarkerEnrichmentTest:
             n = len(cluster_genes)
             if n == 0: continue
 
+            # WE inflates when n is small (N/n term dominates). Skip weighted
+            # scoring below threshold so these clusters rank by adj_p only.
+            use_weighted = self.is_weighted_mode and (
+                self.min_cluster_degs == 0 or n >= self.min_cluster_degs
+            )
+            if self.is_weighted_mode and not use_weighted:
+                logging.warning(
+                    f"{cluster_id}: {n} DEGs < min_cluster_degs={self.min_cluster_degs}; "
+                    f"WE skipped — using unweighted enrichment for this cluster."
+                )
+
             results = []
             for cell_type, weighted_genes in self.marker_dict_internal.items():
                 cell_genes_set = set(weighted_genes.keys()).intersection(self.background_genes)
                 K = len(cell_genes_set)
-                if K == 0: continue
+                if K < self.min_db_markers: continue
 
                 overlap_genes = set(cluster_genes).intersection(cell_genes_set)
                 k = len(overlap_genes)
@@ -400,8 +415,8 @@ class MarkerEnrichmentTest:
                     "Overlapping_genes": ", ".join(display_genes),
                 }
 
-                # 3. Weighted Metrics (Only calculate/add if in Weighted Mode)
-                if self.is_weighted_mode:
+                # 3. Weighted Metrics (Only if weighted mode AND cluster n is sufficient)
+                if use_weighted:
                     overlap_w_sum = sum(weighted_genes[g] for g in overlap_genes)
                     ref_w_sum = sum(weighted_genes[g] for g in cell_genes_set)
 
@@ -428,7 +443,10 @@ class MarkerEnrichmentTest:
 
         if not all_results_list: return pd.DataFrame()
 
-        # Global FDR correction across ALL clusters
+        # Global FDR correction across ALL clusters and cell types.
+        # Per-cluster FDR was tested and reverted: it introduced false positives
+        # (e.g. Sertoli cell in granular epidermis) because the looser per-cluster
+        # threshold passes borderline hits that global BH correctly rejects.
         combined = pd.concat(all_results_list, ignore_index=True)
         combined["adj_p_value"] = multi.multipletests(combined["p_value"], method="fdr_bh")[1]
 
