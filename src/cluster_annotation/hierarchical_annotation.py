@@ -70,6 +70,10 @@ class HierarchicalAnnotator:
             for _, row in pairs.iterrows():
                 name = str(row['cell_name']).strip()
                 cid = str(row['cell_id']).strip()
+                # Normalize CL_XXXXXXX (underscore) → CL:XXXXXXX (colon) to match
+                # the ontology parser's internal format. Both formats exist in the DB.
+                if cid.startswith('CL_'):
+                    cid = 'CL:' + cid[3:]
                 if name and cid and cid.startswith('CL:'):
                     name_to_id[name.upper()] = cid
         return name_to_id
