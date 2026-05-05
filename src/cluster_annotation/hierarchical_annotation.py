@@ -22,6 +22,18 @@ from typing import Dict, List, Optional, Set, Tuple
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# OBO scaffold terms that are structurally necessary in the CL DAG but carry no
+# meaningful cell-biology signal (root, polarity, ploidy, motility supertypes).
+# Filtered out when deriving a broad type from the raw ontology.
+_SCAFFOLD_CL_TERMS = frozenset({
+    'CL:0000000',  # cell (root)
+    'CL:0000001',  # primary cultured cell
+    'CL:0000255',  # eukaryotic cell
+    'CL:0002242',  # nucleate cell
+    'CL:0000219',  # motile cell
+    'CL:0000325',  # stuff accumulating cell
+})
+
 
 class HierarchicalAnnotator:
     """
@@ -427,3 +439,65 @@ class HierarchicalAnnotator:
         )
         consensus = runner_broad is not None and runner_broad == broad_type
         return {'Broad_Type': broad_type, 'Broad_Type_Consensus': consensus}
+
+    def get_broad_type_from_dag(self, top_cl_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Derive a broad cell type label purely from the CL ontology DAG, without
+        relying on enrichment evidence.
+
+        Walks all ancestors of `top_cl_id` and returns the immediate parent
+        (smallest hop-distance) that is not a scaffold/root term and not obsolete.
+        When multiple ancestors share the minimum distance (DAG has multiple
+        parents at the same level), the tiebreak selects the one whose label
+        shares the most tokens with the fine annotation — preferring the lineage
+        axis over functional-state axes (e.g. CD4-positive T cell over naive T cell
+        for a naive CD4+ alpha-beta T cell). Lower CL numeric ID breaks remaining ties.
+
+        Args:
+            top_cl_id: CL ID of the fine-level annotation (e.g. 'CL:0000895')
+
+        Returns:
+            (broad_type_name, broad_type_cl_id) or (None, None) if no valid
+            ancestor exists.
+        """
+        import re
+
+        ancestors = self._get_ancestors(top_cl_id)
+        if not ancestors:
+            return None, None
+
+        valid = {
+            anc_id: dist for anc_id, dist in ancestors.items()
+            if anc_id not in _SCAFFOLD_CL_TERMS
+            and not self.cl_id_to_name.get(anc_id, '').lower().startswith('obsolete')
+        }
+        if not valid:
+            # Terminal lineage head: all ancestors are scaffold terms (e.g. pigment cell,
+            # endothelial cell). Return the term itself as its own broad type so callers
+            # get a non-null, biologically meaningful label rather than NaN.
+            self_label = self.cl_id_to_name.get(top_cl_id, '')
+            if self_label and not self_label.lower().startswith('obsolete') \
+                    and top_cl_id not in _SCAFFOLD_CL_TERMS:
+                return self_label, top_cl_id
+            return None, None
+
+        min_dist = min(valid.values())
+        candidates = {anc_id: dist for anc_id, dist in valid.items() if dist == min_dist}
+
+        fine_label = self.cl_id_to_name.get(top_cl_id, '')
+        fine_tokens = set(re.sub(r'[^a-z0-9]', ' ', fine_label.lower()).split())
+
+        def _sort_key(cid):
+            anc_label = self.cl_id_to_name.get(cid, '')
+            anc_tokens = set(re.sub(r'[^a-z0-9]', ' ', anc_label.lower()).split())
+            token_overlap = len(anc_tokens & fine_tokens)
+            # Numeric part of CL ID for deterministic tiebreak (lower = older/more fundamental)
+            try:
+                cl_num = int(cid.split(':')[1])
+            except (IndexError, ValueError):
+                cl_num = 9999999
+            return (token_overlap, -cl_num)
+
+        best_id = max(candidates, key=_sort_key)
+        best_name = self.cl_id_to_name.get(best_id)
+        return best_name, best_id

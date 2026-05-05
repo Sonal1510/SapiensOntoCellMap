@@ -465,6 +465,85 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
             ['adj_p_value', 'Enrichment_ratio'], ascending=[True, False]
         )
 
+    # Suppression window: only consider the top-N candidates by Combined_Score.
+    # Suppression across the full significant list (300+ terms) is over-aggressive —
+    # every broad term has some distant descendant with a better p-value somewhere.
+    # Restricting to the top window ensures suppression only resolves genuine
+    # head-to-head competition between closely-ranked terms.
+    _SUPPRESSION_WINDOW = 10
+
+    def _apply_descendant_suppression(cluster_res):
+        """
+        Within the top-N candidates (by Combined_Score), suppress any CL ancestor
+        term when a more-specific descendant in that same window has an equal-or-better
+        adjusted p-value.
+
+        Conditional suppression: ancestor is only removed when descendant adj_p ≤
+        ancestor adj_p — so a parent genuinely more significant than all its children
+        (e.g. a mixed-lineage cluster) is preserved.
+
+        Operates on the cell_name_to_id map from hierarchical_annotator; if the
+        annotator is unavailable the function is a no-op.
+        """
+        if hierarchical_annotator is None or cluster_res.empty:
+            return cluster_res
+
+        name_to_id = hierarchical_annotator.cell_name_to_id
+        p_col = 'adj_p_value'
+
+        # Restrict competition window to top-N by Combined_Score
+        window = cluster_res.head(_SUPPRESSION_WINDOW)
+
+        # Build {cl_id: adj_p} for terms in the window with a resolvable CL ID
+        cl_id_to_p = {}
+        for _, row in window.iterrows():
+            cid = name_to_id.get(str(row['Cell_type']).strip().upper())
+            if cid:
+                cl_id_to_p[cid] = float(row[p_col]) if pd.notna(row[p_col]) else 1.0
+
+        if len(cl_id_to_p) < 2:
+            return cluster_res
+
+        # Mark an ancestor for suppression only when a window-peer descendant
+        # has adj_p ≤ ancestor adj_p
+        suppress_ids = set()
+        cl_ids = list(cl_id_to_p.keys())
+        for anc_id in cl_ids:
+            anc_p = cl_id_to_p[anc_id]
+            for desc_id in cl_ids:
+                if desc_id == anc_id:
+                    continue
+                desc_ancestors = hierarchical_annotator._get_ancestors(desc_id)
+                if anc_id in desc_ancestors and cl_id_to_p[desc_id] <= anc_p:
+                    suppress_ids.add(anc_id)
+                    break
+
+        if not suppress_ids:
+            return cluster_res
+
+        suppress_names = set()
+        id_to_name = {v: k for k, v in name_to_id.items()}
+        for sid in suppress_ids:
+            name = id_to_name.get(sid)
+            if name:
+                suppress_names.add(name.upper())
+
+        filtered = cluster_res[
+            ~cluster_res['Cell_type'].str.strip().str.upper().isin(suppress_names)
+        ]
+
+        if filtered.empty:
+            return cluster_res
+
+        n_suppressed = len(cluster_res) - len(filtered)
+        if n_suppressed > 0:
+            suppressed_labels = [id_to_name.get(s, s) for s in suppress_ids]
+            logger.info(
+                f"Descendant suppression (window={_SUPPRESSION_WINDOW}): "
+                f"suppressed {n_suppressed} ancestor(s): {suppressed_labels}"
+            )
+        return filtered
+
     def _extract_top_rows(ctx_name, cluster):
         """Return (top_row, runner_up_row) from a context's level2 df, or (None, None)."""
         df = final_sig_results.get(ctx_name, {}).get('level2')
@@ -474,6 +553,7 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
         if cluster_res.empty:
             return None, None
         cluster_res = _sort_cluster_results(cluster_res)
+        cluster_res = _apply_descendant_suppression(cluster_res)
         top = cluster_res.iloc[0]
         runner = cluster_res.iloc[1] if len(cluster_res) > 1 else None
         return top, runner
@@ -546,7 +626,8 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
                 'Top_Cell_Type': 'Unannotated',
                 'Runner_Up_Cell_Type': None, 'Score_Gap': None,
                 'Source': 'None', 'P_Value': None, 'Score': None, 'Genes': '',
-                'Confidence': None, 'Broad_Type': None, 'Broad_Type_Consensus': None,
+                'Confidence': None, 'Broad_Type': None, 'Broad_Type_CL_ID': None,
+                'Broad_Type_Consensus': None,
                 'N_Databases': None, 'Proliferative_Flag': False,
                 'Proliferative_Genes': '', 'Proliferating_Lineage': '',
                 'Lineage_Conflict': False,
@@ -556,6 +637,7 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
         # Hierarchical context: confidence, broad type, consensus, lineage check
         confidence = None
         broad_type = None
+        broad_type_cl_id = None
         broad_type_consensus = None
         lineage_conflict = False
 
@@ -570,23 +652,30 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
                 top_cell_type=selected_hit.get('Top_Cell_Type'),
                 runner_up_cell_type=selected_hit.get('Runner_Up_Cell_Type'),
             )
-            broad_type = broad_result['Broad_Type']
             broad_type_consensus = broad_result['Broad_Type_Consensus']
 
+            # Replace enrichment-derived Broad_Type with a pure CL DAG walk:
+            # look up the Top_Cell_Type's CL ID, then find the shallowest
+            # non-scaffold ancestor in the ontology — no hardcoding of cell biology.
+            top_cl_id_for_broad = hierarchical_annotator.cell_name_to_id.get(
+                str(selected_hit.get('Top_Cell_Type', '')).strip().upper()
+            )
+            if top_cl_id_for_broad:
+                dag_name, dag_cl_id = hierarchical_annotator.get_broad_type_from_dag(
+                    top_cl_id_for_broad
+                )
+                if dag_name:
+                    broad_type = dag_name
+                    broad_type_cl_id = dag_cl_id
+
             # Lineage conflict: Top_Cell_Type must be a CL descendant of Broad_Type.
-            if broad_type and selected_hit.get('Top_Cell_Type'):
-                top_cl_id = hierarchical_annotator.cell_name_to_id.get(
-                    str(selected_hit['Top_Cell_Type']).strip().upper()
-                )
-                broad_cl_id = hierarchical_annotator.cell_name_to_id.get(
-                    str(broad_type).strip().upper()
-                )
-                if top_cl_id and broad_cl_id and top_cl_id != broad_cl_id:
-                    top_ancestors = hierarchical_annotator._get_ancestors(top_cl_id)
-                    lineage_conflict = broad_cl_id not in top_ancestors
+            if broad_type_cl_id and top_cl_id_for_broad and top_cl_id_for_broad != broad_type_cl_id:
+                top_ancestors = hierarchical_annotator._get_ancestors(top_cl_id_for_broad)
+                lineage_conflict = broad_type_cl_id not in top_ancestors
 
         selected_hit['Confidence'] = confidence
         selected_hit['Broad_Type'] = broad_type
+        selected_hit['Broad_Type_CL_ID'] = broad_type_cl_id
         selected_hit['Broad_Type_Consensus'] = broad_type_consensus
         selected_hit['Lineage_Conflict'] = lineage_conflict
 
@@ -631,7 +720,7 @@ def generate_top_annotation_summary(final_sig_results, output_dir, job_name, tis
         col_order = [
             'Cluster', 'Top_Cell_Type', 'Runner_Up_Cell_Type', 'Score_Gap',
             'Source', 'P_Value', 'Score', 'Genes', 'Confidence',
-            'Broad_Type', 'Broad_Type_Consensus', 'N_Databases',
+            'Broad_Type', 'Broad_Type_CL_ID', 'Broad_Type_Consensus', 'N_Databases',
             'Proliferative_Flag', 'Proliferative_Genes',
             'Proliferating_Lineage', 'Lineage_Conflict',
         ]

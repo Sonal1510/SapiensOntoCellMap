@@ -1116,7 +1116,8 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
         # Rename for display (Proliferative_Flag/Genes excluded — shown as badge)
         display_cols = {
             'Cluster': 'Cluster', 'Top_Cell_Type': 'Cell Type',
-            'Broad_Type': 'Broad Type', 'Confidence': 'Confidence',
+            'Broad_Type': 'Broad Type', 'Broad_Type_CL_ID': 'Broad Type CL ID',
+            'Confidence': 'Confidence',
             'P_Value': 'Adj. P-Value', 'Score': 'Score (Weighted Enrichment)',
             'N_Databases': 'N Databases', 'Source': 'DB Source', 'Genes': 'Top Genes'
         }
@@ -1171,7 +1172,8 @@ def _build_summary_tab_html(top_annotation_df, umap_html, heatmap_html):
             'A <span style="background:#e85d04;color:#fff;border-radius:3px;padding:1px 4px;font-size:10px;">&#9888;&nbsp;PROLIF</span> '
             'badge flags clusters where &ge;2 overlapping genes are canonical cell-cycle markers '
             '(see alert above for clinical interpretation). '
-            '<em>Broad Type</em> — broad CL ancestor (Depth&nbsp;≤&nbsp;3). '
+            '<em>Broad Type</em> — shallowest meaningful CL ontology ancestor of the annotated cell type (ontology-derived, no hardcoding). '
+            '<em>Broad Type CL ID</em> — Cell Ontology identifier for the broad type. '
             '<em>Confidence</em> — fraction of known subtypes supporting this node. '
             '<em>Score</em> — Weighted Enrichment Ratio&nbsp;= (W_overlap/n)&nbsp;÷&nbsp;(W_ref/N). '
             '<em>N&nbsp;Databases</em> — number of independent databases corroborating the overlapping genes. '
