@@ -534,7 +534,64 @@ class SapiensMapGenerator:
                          f"({len(detail_genes)} with source details).")
 
     # =================================================================
-    # 9. ASSEMBLE & EMBED
+    # 9. ANATOMY DATA
+    # =================================================================
+
+    # Maps SVG region id → list of UBERON tissue_name substrings to match
+    _ANATOMY_REGIONS = {
+        "region-brain":        ["brain", "cerebr", "cortex", "hippocamp", "cerebellum", "hypothalamus", "striatum", "thalamus", "spinal cord", "meninges"],
+        "region-lung":         ["lung", "bronch", "alveol", "trachea", "airway", "pulmonary"],
+        "region-heart":        ["heart", "cardiac", "myocardi", "pericardi", "aorta"],
+        "region-liver":        ["liver", "hepat", "bile duct", "gallbladder"],
+        "region-kidney":       ["kidney", "renal", "nephron", "ureter", "bladder", "urothelial"],
+        "region-skin":         ["skin", "epiderm", "dermis", "melanocyte", "keratinocyte", "sebaceous"],
+        "region-blood":        ["blood", "bone marrow", "pbmc", "peripheral blood", "hematopoietic", "spleen", "thymus", "lymph"],
+        "region-colon":        ["colon", "colorect", "intestin", "bowel", "rectum", "cecum", "appendix", "gut", "gastrointestinal"],
+        "region-breast":       ["breast", "mammary"],
+        "region-prostate":     ["prostate"],
+        "region-ovary":        ["ovary", "ovarian", "uterus", "endometri", "cervix", "fallopian"],
+        "region-muscle":       ["muscle", "skeletal muscle", "myocyte", "myoblast"],
+        "region-eye":          ["eye", "retina", "cornea", "ocular", "optic"],
+        "region-pancreas":     ["pancreas", "islet", "beta cell", "acinar"],
+        "region-lymphnode":    ["lymph node", "lymph", "germinal center"],
+    }
+
+    def _compute_anatomy_data(self):
+        """Build per-region stats for the anatomy SVG tab."""
+        self.logger.info("Computing anatomy region data...")
+        df = self.df
+
+        region_stats = {}
+        for region_id, keywords in self._ANATOMY_REGIONS.items():
+            pattern = "|".join(keywords)
+            mask = df["tissue_name"].str.contains(pattern, case=False, na=False)
+            sub = df[mask]
+            if sub.empty:
+                region_stats[region_id] = {
+                    "cell_type_count": 0,
+                    "marker_count": 0,
+                    "top_cell_types": [],
+                    "tissue_names": [],
+                }
+                continue
+            top_cells = (sub.groupby("cell_name")["gene"]
+                           .nunique()
+                           .sort_values(ascending=False)
+                           .head(5)
+                           .index.tolist())
+            tissue_names = sorted(sub["tissue_name"].dropna().unique().tolist())[:8]
+            region_stats[region_id] = {
+                "cell_type_count": int(sub["cell_name"].nunique()),
+                "marker_count":    int(sub["gene"].nunique()),
+                "top_cell_types":  top_cells,
+                "tissue_names":    tissue_names,
+            }
+
+        self.anatomy_data = region_stats
+        self.logger.info(f"Anatomy data built for {len(region_stats)} regions.")
+
+    # =================================================================
+    # 10. ASSEMBLE & EMBED
     # =================================================================
 
     def _assemble_and_embed(self):
@@ -555,6 +612,7 @@ class SapiensMapGenerator:
             "all_genes_list": self.all_genes,
             "all_tissues_list": self.all_tissues_list,
             "all_cells_list": self.all_cells_list,
+            "anatomy_data": self.anatomy_data,
         }
 
         json_str = json.dumps(self.final_data)
@@ -715,6 +773,7 @@ class SapiensMapGenerator:
         self._build_cell_marker_evidence()
         self._build_cell_tissue_summary()
         self._build_gene_centric_data()
+        self._compute_anatomy_data()
         self._assemble_and_embed()
 
         self.logger.info("=== SapiensOntoCellMap Generator END ===")

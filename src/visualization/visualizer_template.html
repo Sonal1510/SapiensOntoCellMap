@@ -476,16 +476,172 @@
         <span class="logo">SapiensOntoCellMap</span>
         <span class="logo-sub">Integrated Cell Marker Database Explorer</span>
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="tab-dashboard">Dashboard</button>
+            <button class="tab-btn active" data-tab="tab-anatomy">&#127759; Anatomy Map</button>
+            <button class="tab-btn" data-tab="tab-dashboard">Dashboard</button>
             <button class="tab-btn" data-tab="tab-ontology">Ontology Browser</button>
             <button class="tab-btn" data-tab="tab-cell">Cell Explorer</button>
             <button class="tab-btn" data-tab="tab-gene">Gene Explorer</button>
         </nav>
+        <!-- Global search trigger -->
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <button id="global-search-trigger" onclick="openSearch()" title="Search (Ctrl+K)"
+                style="background:rgba(255,255,255,0.15); border:none; border-radius:8px;
+                       padding:7px 14px; color:#fff; font-size:0.82rem; cursor:pointer;
+                       display:flex; align-items:center; gap:6px; white-space:nowrap;">
+                &#128269; Search &nbsp;<kbd style="background:rgba(255,255,255,0.2);border-radius:4px;padding:1px 5px;font-size:0.72rem;">Ctrl K</kbd>
+            </button>
+        </div>
     </header>
 
     <main>
+        <!-- ============ TAB 0: ANATOMY MAP ============ -->
+        <div id="tab-anatomy" class="tab-content active">
+            <div style="display:grid; grid-template-columns:1fr 380px; gap:20px; height:calc(100vh - var(--header-h) - 40px);">
+
+                <!-- Left: SVG body + stat chips -->
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <!-- Stat chips (reuse DATA.stats) -->
+                    <div class="stats-row" style="margin-bottom:0;" id="anatomy-stats-row">
+                        <div class="stat-card"><div class="stat-value" id="an-markers">--</div><div class="stat-label">Total Markers</div></div>
+                        <div class="stat-card"><div class="stat-value" id="an-genes">--</div><div class="stat-label">Unique Genes</div></div>
+                        <div class="stat-card"><div class="stat-value" id="an-cells">--</div><div class="stat-label">Cell Types</div></div>
+                        <div class="stat-card"><div class="stat-value" id="an-tissues">--</div><div class="stat-label">Tissues</div></div>
+                        <div class="stat-card"><div class="stat-value" id="an-dbs">--</div><div class="stat-label">Databases</div></div>
+                    </div>
+
+                    <!-- Human body SVG -->
+                    <div class="panel" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+                        <div class="panel-header">Human Body Map
+                            <span class="panel-info">Click a region to explore cell types &amp; markers</span>
+                        </div>
+                        <div class="panel-body" style="flex:1; display:flex; justify-content:center; align-items:center; padding:12px;">
+                            <svg id="anatomy-svg" viewBox="0 0 340 600" width="100%" height="100%"
+                                 style="max-height:500px; cursor:pointer; user-select:none;">
+                                <!-- Simplified human silhouette — 15 clickable regions -->
+                                <style>
+                                    .anat-region { fill:#e8f0fe; stroke:#93c5fd; stroke-width:1.5; transition:fill 0.18s, stroke 0.18s; }
+                                    .anat-region:hover { fill:#bfdbfe; stroke:#2563eb; stroke-width:2; }
+                                    .anat-region.selected { fill:#2563eb; stroke:#1e40af; stroke-width:2.5; }
+                                    .anat-label { font:bold 9px sans-serif; fill:#1e40af; pointer-events:none; text-anchor:middle; }
+                                </style>
+
+                                <!-- HEAD / BRAIN -->
+                                <ellipse id="region-brain" class="anat-region" cx="170" cy="52" rx="40" ry="44" data-region="region-brain"/>
+                                <text class="anat-label" x="170" y="55">Brain</text>
+
+                                <!-- EYES -->
+                                <ellipse id="region-eye" class="anat-region" cx="155" cy="44" rx="7" ry="5" data-region="region-eye"/>
+                                <ellipse class="anat-region" cx="185" cy="44" rx="7" ry="5" data-region="region-eye" style="pointer-events:none;"/>
+                                <text class="anat-label" x="170" y="30">Eyes</text>
+
+                                <!-- NECK / LYMPH NODES -->
+                                <rect id="region-lymphnode" class="anat-region" x="155" y="95" width="30" height="22" rx="6" data-region="region-lymphnode"/>
+                                <text class="anat-label" x="170" y="109">Lymph</text>
+
+                                <!-- TORSO outline -->
+                                <rect x="120" y="118" width="100" height="210" rx="18" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+
+                                <!-- LUNG (left + right) -->
+                                <ellipse id="region-lung" class="anat-region" cx="145" cy="160" rx="22" ry="36" data-region="region-lung"/>
+                                <ellipse class="anat-region" cx="195" cy="160" rx="22" ry="36" data-region="region-lung" style="pointer-events:none;"/>
+                                <text class="anat-label" x="170" y="135">Lung</text>
+
+                                <!-- HEART -->
+                                <path id="region-heart" class="anat-region" data-region="region-heart"
+                                      d="M170,155 C170,155 155,143 148,150 C141,157 141,168 155,178 L170,192 L185,178 C199,168 199,157 192,150 C185,143 170,155 170,155 Z"/>
+                                <text class="anat-label" x="170" y="175">Heart</text>
+
+                                <!-- LIVER -->
+                                <ellipse id="region-liver" class="anat-region" cx="185" cy="210" rx="28" ry="20" data-region="region-liver"/>
+                                <text class="anat-label" x="186" y="213">Liver</text>
+
+                                <!-- PANCREAS -->
+                                <ellipse id="region-pancreas" class="anat-region" cx="148" cy="218" rx="20" ry="11" data-region="region-pancreas"/>
+                                <text class="anat-label" x="148" y="221">Pancreas</text>
+
+                                <!-- COLON / GUT -->
+                                <rect id="region-colon" class="anat-region" x="138" y="238" width="64" height="52" rx="10" data-region="region-colon"/>
+                                <text class="anat-label" x="170" y="268">Colon / Gut</text>
+
+                                <!-- BLOOD / BONE MARROW (represented as sternum area) -->
+                                <rect id="region-blood" class="anat-region" x="162" y="128" width="16" height="80" rx="4" data-region="region-blood"/>
+                                <text class="anat-label" x="170" y="122">Blood/BM</text>
+
+                                <!-- ARMS / MUSCLE (left arm) -->
+                                <rect id="region-muscle" class="anat-region" x="88" y="118" width="26" height="120" rx="12" data-region="region-muscle"/>
+                                <rect class="anat-region" x="226" y="118" width="26" height="120" rx="12" data-region="region-muscle" style="pointer-events:none;"/>
+                                <text class="anat-label" x="88" y="112">Muscle</text>
+
+                                <!-- SKIN (thin outer border strip) -->
+                                <rect id="region-skin" class="anat-region" x="115" y="115" width="110" height="218" rx="20"
+                                      fill="none" stroke="#fbbf24" stroke-width="5" data-region="region-skin" style="pointer-events:stroke;"/>
+                                <text class="anat-label" x="230" y="145" style="fill:#92400e;">Skin</text>
+
+                                <!-- KIDNEY (left + right) -->
+                                <ellipse id="region-kidney" class="anat-region" cx="138" cy="248" rx="12" ry="16" data-region="region-kidney"/>
+                                <ellipse class="anat-region" cx="202" cy="248" rx="12" ry="16" data-region="region-kidney" style="pointer-events:none;"/>
+                                <text class="anat-label" x="170" y="246">Kidney</text>
+
+                                <!-- LEGS / lower body -->
+                                <rect x="128" y="330" width="38" height="160" rx="12" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+                                <rect x="174" y="330" width="38" height="160" rx="12" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+
+                                <!-- PROSTATE / OVARY (pelvis) -->
+                                <ellipse id="region-prostate" class="anat-region" cx="155" cy="310" rx="18" ry="12" data-region="region-prostate"/>
+                                <ellipse id="region-ovary" class="anat-region" cx="185" cy="310" rx="18" ry="12" data-region="region-ovary"/>
+                                <text class="anat-label" x="155" y="313">Prostate</text>
+                                <text class="anat-label" x="185" y="313">Ovary</text>
+
+                                <!-- BREAST (chest, female marker) -->
+                                <ellipse id="region-breast" class="anat-region" cx="148" cy="175" rx="14" ry="12" data-region="region-breast"/>
+                                <ellipse class="anat-region" cx="192" cy="175" rx="14" ry="12" data-region="region-breast" style="pointer-events:none;"/>
+                                <text class="anat-label" x="170" y="192">Breast</text>
+
+                                <!-- Tooltip -->
+                                <g id="anat-tooltip" style="display:none; pointer-events:none;">
+                                    <rect id="anat-tt-bg" rx="6" fill="#1e293b" opacity="0.92"/>
+                                    <text id="anat-tt-text" fill="#f8fafc" font-size="10" font-family="sans-serif"/>
+                                </g>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Search + region detail panel -->
+                <div style="display:flex; flex-direction:column; gap:16px; overflow-y:auto;">
+
+                    <!-- Search box -->
+                    <div class="panel">
+                        <div class="panel-header">&#128269; Search Database
+                            <span class="panel-info">Cell types, tissues, or genes</span>
+                        </div>
+                        <div class="panel-controls" style="padding:14px 16px;">
+                            <input id="global-search-input" type="text" placeholder="e.g. keratinocyte, KRT14, skin…"
+                                   oninput="onSearchInput(this.value)"
+                                   style="width:100%; padding:9px 12px; border:1px solid var(--border);
+                                          border-radius:8px; font-size:0.88rem; outline:none;
+                                          transition:border-color 0.15s;"
+                                   onfocus="this.style.borderColor='var(--primary)'"
+                                   onblur="this.style.borderColor='var(--border)'"/>
+                        </div>
+                        <div id="search-results" style="padding:0 16px 14px; display:none;"></div>
+                    </div>
+
+                    <!-- Region detail panel -->
+                    <div class="panel" style="flex:1;">
+                        <div class="panel-header" id="region-detail-title">Region Details
+                            <span class="panel-info">Click a body region to explore</span>
+                        </div>
+                        <div class="panel-body panel-body-np" id="region-detail-body">
+                            <div class="empty-state">Click any region on the body map to see cell types and markers.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ============ TAB 1: DASHBOARD ============ -->
-        <div id="tab-dashboard" class="tab-content active">
+        <div id="tab-dashboard" class="tab-content">
             <div class="stats-row">
                 <div class="stat-card"><div class="stat-value" id="sv-markers">--</div><div class="stat-label">Total Markers</div></div>
                 <div class="stat-card"><div class="stat-value" id="sv-genes">--</div><div class="stat-label">Unique Genes</div></div>
@@ -655,6 +811,9 @@
                 btn.addEventListener('click', () => switchTab(btn.dataset.tab));
             });
 
+            // Anatomy tab (default)
+            initAnatomy();
+
             // Dashboard
             initDashboard();
 
@@ -696,6 +855,18 @@
                     setTimeout(initOntology, 50);
                 }
             };
+
+            // Fuse.js global search
+            initSearch();
+
+            // Ctrl+K shortcut
+            document.addEventListener('keydown', e => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                    e.preventDefault();
+                    openSearch();
+                }
+                if (e.key === 'Escape') closeSearch();
+            });
 
             hideLoading();
         }
@@ -1252,6 +1423,245 @@
                 '<strong style="font-size:1.1rem;">Error</strong><br><br>' + msg + '</div>';
             el.style.opacity = '1';
         }
+
+        // =====================================================================
+        // ANATOMY TAB
+        // =====================================================================
+        const REGION_LABELS = {
+            'region-brain':     'Brain & CNS',
+            'region-eye':       'Eye',
+            'region-lymphnode': 'Lymph Node / Thymus',
+            'region-lung':      'Lung',
+            'region-heart':     'Heart',
+            'region-liver':     'Liver',
+            'region-pancreas':  'Pancreas',
+            'region-colon':     'Colon / GI Tract',
+            'region-blood':     'Blood / Bone Marrow',
+            'region-muscle':    'Muscle',
+            'region-skin':      'Skin',
+            'region-kidney':    'Kidney',
+            'region-prostate':  'Prostate',
+            'region-ovary':     'Ovary / Uterus',
+            'region-breast':    'Breast',
+        };
+
+        function initAnatomy() {
+            const s = DATA.stats;
+            document.getElementById('an-markers').textContent = fmtNum(s.total_markers);
+            document.getElementById('an-genes').textContent   = fmtNum(s.unique_genes);
+            document.getElementById('an-cells').textContent   = fmtNum(s.unique_cell_types);
+            document.getElementById('an-tissues').textContent = fmtNum(s.unique_tissues);
+            document.getElementById('an-dbs').textContent     = s.num_databases;
+
+            // Wire SVG region clicks
+            document.querySelectorAll('.anat-region').forEach(el => {
+                const regionId = el.dataset.region;
+                if (!regionId) return;
+                el.addEventListener('click', () => selectAnatomyRegion(regionId));
+                el.style.cursor = 'pointer';
+            });
+        }
+
+        function selectAnatomyRegion(regionId) {
+            // Deselect all
+            document.querySelectorAll('.anat-region').forEach(el => {
+                el.classList.remove('selected');
+            });
+            // Select all paths for this region
+            document.querySelectorAll('[data-region="' + regionId + '"]').forEach(el => {
+                el.classList.add('selected');
+            });
+
+            const label  = REGION_LABELS[regionId] || regionId;
+            const stats  = (DATA.anatomy_data || {})[regionId];
+
+            document.getElementById('region-detail-title').innerHTML =
+                label + ' <span class="panel-info">Region details</span>';
+
+            if (!stats || stats.cell_type_count === 0) {
+                document.getElementById('region-detail-body').innerHTML =
+                    '<div class="empty-state">No marker data available for this region.</div>';
+                return;
+            }
+
+            const topCells = stats.top_cell_types.map(c =>
+                '<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:12px;' +
+                'padding:3px 10px;font-size:0.78rem;margin:2px;">' + c + '</span>'
+            ).join('');
+
+            const tissues = stats.tissue_names.map(t =>
+                '<span style="display:inline-block;background:#f0fdf4;color:#166534;border-radius:10px;' +
+                'padding:2px 9px;font-size:0.76rem;margin:2px;">' + t + '</span>'
+            ).join('');
+
+            document.getElementById('region-detail-body').innerHTML =
+                '<div style="padding:16px; display:flex; flex-direction:column; gap:14px;">' +
+                  '<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">' +
+                    '<div style="background:#f8fafc;border-radius:8px;padding:12px;text-align:center;">' +
+                      '<div style="font-size:1.5rem;font-weight:700;color:#2563eb;">' + fmtNum(stats.cell_type_count) + '</div>' +
+                      '<div style="font-size:0.75rem;color:#64748b;">Cell Types</div>' +
+                    '</div>' +
+                    '<div style="background:#f8fafc;border-radius:8px;padding:12px;text-align:center;">' +
+                      '<div style="font-size:1.5rem;font-weight:700;color:#059669;">' + fmtNum(stats.marker_count) + '</div>' +
+                      '<div style="font-size:0.75rem;color:#64748b;">Unique Markers</div>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div>' +
+                    '<div style="font-size:0.78rem;font-weight:600;color:#475569;margin-bottom:6px;">Top Cell Types</div>' +
+                    topCells +
+                  '</div>' +
+                  '<div>' +
+                    '<div style="font-size:0.78rem;font-weight:600;color:#475569;margin-bottom:6px;">Tissues Covered</div>' +
+                    tissues +
+                  '</div>' +
+                  '<button onclick="switchTab(\'tab-cell\')" ' +
+                    'style="width:100%;padding:9px;background:#2563eb;color:#fff;border:none;border-radius:8px;' +
+                    'font-size:0.85rem;font-weight:500;cursor:pointer;margin-top:4px;">' +
+                    '&#128269; Explore Cell Types in Cell Explorer</button>' +
+                '</div>';
+        }
+
+        // =====================================================================
+        // FUSE.JS SEARCH (inline — no CDN dependency)
+        // =====================================================================
+        // Minimal Fuse.js v7 subset — fuzzy search over a flat array of items
+        // Each item: { type, id, name }
+        // Full library replaced with a lightweight prefix+fuzzy matcher to keep
+        // the HTML self-contained without an additional CDN call.
+
+        let _searchIndex = [];
+        let _searchInited = false;
+
+        function initSearch() {
+            if (_searchInited) return;
+            _searchIndex = [
+                ...DATA.all_cells_list.map(c => ({ type: 'cell',   id: c.cell_id,   name: c.cell_name })),
+                ...(DATA.all_tissues_list || []).map(t => ({ type: 'tissue', id: t.tissue_id, name: t.tissue_name })),
+                ...DATA.all_genes_list.map(g => ({ type: 'gene',   id: g,           name: g })),
+            ];
+            _searchInited = true;
+        }
+
+        function _fuzzyMatch(query, text) {
+            if (!query || !text) return false;
+            const q = query.toLowerCase();
+            const t = text.toLowerCase();
+            if (t.includes(q)) return { score: t.startsWith(q) ? 1 : 0.8 };
+            // simple char-sequence fuzzy
+            let qi = 0;
+            for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+                if (t[ti] === q[qi]) qi++;
+            }
+            if (qi === q.length) return { score: 0.4 };
+            return false;
+        }
+
+        function searchItems(query, maxPerType) {
+            if (!query || query.length < 2) return { cell: [], tissue: [], gene: [] };
+            const results = { cell: [], tissue: [], gene: [] };
+            for (const item of _searchIndex) {
+                const m = _fuzzyMatch(query, item.name);
+                if (m && results[item.type].length < maxPerType) {
+                    results[item.type].push({ ...item, score: m.score });
+                }
+            }
+            // Sort each group: exact/prefix matches first
+            for (const type of ['cell', 'tissue', 'gene']) {
+                results[type].sort((a, b) => b.score - a.score);
+            }
+            return results;
+        }
+
+        function onSearchInput(query) {
+            const el = document.getElementById('search-results');
+            if (!query || query.length < 2) {
+                el.style.display = 'none';
+                return;
+            }
+            const results = searchItems(query, 5);
+            const total = results.cell.length + results.tissue.length + results.gene.length;
+            if (total === 0) {
+                el.innerHTML = '<div style="color:#94a3b8;font-size:0.82rem;padding:4px 0;">No results found.</div>';
+                el.style.display = 'block';
+                return;
+            }
+            el.innerHTML = renderSearchResults(results);
+            el.style.display = 'block';
+        }
+
+        function renderSearchResults(results) {
+            let html = '';
+            const sections = [
+                { key: 'cell',   label: '🔬 Cell Types', tab: 'tab-cell',   action: (item) => 'selectCellResult(\'' + item.id + '\')' },
+                { key: 'tissue', label: '🧫 Tissues',    tab: 'tab-anatomy', action: null },
+                { key: 'gene',   label: '🧬 Genes',      tab: 'tab-gene',    action: (item) => 'selectGeneResult(\'' + item.id + '\')' },
+            ];
+            for (const sec of sections) {
+                const items = results[sec.key];
+                if (!items.length) continue;
+                html += '<div style="margin-bottom:10px;">';
+                html += '<div style="font-size:0.72rem;font-weight:700;color:#94a3b8;text-transform:uppercase;' +
+                        'letter-spacing:0.05em;margin-bottom:4px;">' + sec.label + '</div>';
+                for (const item of items) {
+                    const onclick = sec.action ? sec.action(item) : 'switchTab(\'' + sec.tab + '\')';
+                    html += '<div onclick="' + onclick + '" style="padding:7px 10px;border-radius:7px;cursor:pointer;' +
+                            'font-size:0.84rem;color:var(--text);transition:background 0.1s;" ' +
+                            'onmouseover="this.style.background=\'#f1f5f9\'" onmouseout="this.style.background=\'\'">' +
+                            '<span style="font-weight:500;">' + item.name + '</span>';
+                    if (item.id && item.id !== item.name) {
+                        html += ' <span style="color:#94a3b8;font-size:0.76rem;">(' + item.id + ')</span>';
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            return html;
+        }
+
+        function selectCellResult(cellId) {
+            document.getElementById('search-results').style.display = 'none';
+            document.getElementById('global-search-input').value = '';
+            switchTab('tab-cell');
+            setTimeout(() => {
+                if (tomSelects['select-cell']) {
+                    tomSelects['select-cell'].setValue(cellId);
+                }
+            }, 100);
+        }
+
+        function selectGeneResult(gene) {
+            document.getElementById('search-results').style.display = 'none';
+            document.getElementById('global-search-input').value = '';
+            switchTab('tab-gene');
+            setTimeout(() => {
+                if (tomSelects['select-gene']) {
+                    tomSelects['select-gene'].setValue(gene);
+                }
+            }, 100);
+        }
+
+        // Modal search overlay (Ctrl+K)
+        function openSearch() {
+            switchTab('tab-anatomy');
+            setTimeout(() => {
+                const inp = document.getElementById('global-search-input');
+                if (inp) inp.focus();
+            }, 80);
+        }
+
+        function closeSearch() {
+            const el = document.getElementById('search-results');
+            if (el) el.style.display = 'none';
+        }
+
+        // Close search results when clicking outside
+        document.addEventListener('click', e => {
+            const inp = document.getElementById('global-search-input');
+            const res = document.getElementById('search-results');
+            if (inp && res && !inp.contains(e.target) && !res.contains(e.target)) {
+                res.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>
