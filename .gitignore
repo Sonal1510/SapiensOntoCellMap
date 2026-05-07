@@ -1,6 +1,5 @@
 # --- Data directories (large files, machine-generated) ---
-data/*
-!data/pre_manually_downloaded_files/
+data/
 
 # --- Virtual environment ---
 SapiensOntoCellMap_env/
