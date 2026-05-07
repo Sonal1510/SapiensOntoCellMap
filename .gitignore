@@ -23,12 +23,14 @@ __pycache__/
 .idea/
 *.swp
 
-# --- Large binary / generated data in benchmarking ---
-benchmarking/results/**/*.h5ad
-benchmarking/results/**/*.h5
-benchmarking/results/**/degs.csv
-benchmarking/results/pbmc3k_degs.csv
-benchmarking/results/**/sapiensonto/
-benchmarking/results/sapiensonto_out/
-# Keep: accuracy CSVs, summary TXTs, PNGs in results/
-src/cluster_annotation/data/
+# --- Logs and processing artifacts ---
+*.log
+processing_status_*.csv
+
+# --- Benchmarking outputs (go to Zenodo, not repo) ---
+benchmarking/results/
+benchmarking/data/
+
+# --- Tool output directories ---
+SapiensOntoCellMap_out/
+SapiensOntoCellMap_out_*/

@@ -1,8 +1,0 @@
-SapiensOntoCellMap — PBMC3k Benchmark
-Date: 2026-02-24
-
-n_clusters: 8
-top1_accuracy: 1.0000
-cl_exact_accuracy: 0.0000
-hierarchical_accuracy: 1.0000
-broad_type_accuracy: 0.8750
