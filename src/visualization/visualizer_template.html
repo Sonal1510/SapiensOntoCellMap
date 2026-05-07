@@ -514,94 +514,228 @@
                         <div class="panel-header">Human Body Map
                             <span class="panel-info">Click a region to explore cell types &amp; markers</span>
                         </div>
-                        <div class="panel-body" style="flex:1; display:flex; justify-content:center; align-items:center; padding:12px;">
-                            <svg id="anatomy-svg" viewBox="0 0 340 600" width="100%" height="100%"
-                                 style="max-height:500px; cursor:pointer; user-select:none;">
-                                <!-- Simplified human silhouette — 15 clickable regions -->
-                                <style>
-                                    .anat-region { fill:#e8f0fe; stroke:#93c5fd; stroke-width:1.5; transition:fill 0.18s, stroke 0.18s; }
-                                    .anat-region:hover { fill:#bfdbfe; stroke:#2563eb; stroke-width:2; }
-                                    .anat-region.selected { fill:#2563eb; stroke:#1e40af; stroke-width:2.5; }
-                                    .anat-label { font:bold 9px sans-serif; fill:#1e40af; pointer-events:none; text-anchor:middle; }
-                                </style>
+                        <div class="panel-body" style="flex:1; display:flex; justify-content:center; align-items:flex-start; padding:8px; overflow:auto;">
+                            <svg id="anatomy-svg" viewBox="0 0 500 720" width="100%" height="100%"
+                                 style="max-height:680px; min-height:480px; cursor:pointer; user-select:none;">
+                                <defs>
+                                    <style>
+                                        .anat-silhouette { fill:#f0f4ff; stroke:#c7d7f8; stroke-width:2; }
+                                        .anat-region { transition:fill 0.18s, stroke 0.18s, opacity 0.18s; }
+                                        .anat-region:hover { opacity:0.85; }
+                                        .anat-region.selected { stroke-width:2.5 !important; filter:brightness(0.85); }
+                                        .anat-leader { stroke:#94a3b8; stroke-width:1; fill:none; }
+                                        .anat-label-bg { fill:white; rx:3; }
+                                        .anat-lbl { font:bold 10px 'Segoe UI',sans-serif; fill:#1e40af; pointer-events:none; }
+                                        .anat-lbl-sm { font:9px 'Segoe UI',sans-serif; fill:#64748b; pointer-events:none; }
+                                        .anat-pill { cursor:pointer; transition:opacity 0.18s; }
+                                        .anat-pill:hover { opacity:0.8; }
+                                        .anat-pill.selected rect { stroke-width:2.5 !important; filter:brightness(0.85); }
+                                    </style>
+                                    <!-- clip path keeps organs inside torso -->
+                                    <clipPath id="torso-clip">
+                                        <path d="M200,110 C230,110 260,118 268,135 L278,200 C285,240 282,290 270,330
+                                                 L258,360 L245,360 L242,325 L200,325 L158,325 L155,360 L142,360
+                                                 L130,330 C118,290 115,240 122,200 L132,135 C140,118 170,110 200,110 Z"/>
+                                    </clipPath>
+                                </defs>
 
-                                <!-- HEAD / BRAIN -->
-                                <ellipse id="region-brain" class="anat-region" cx="170" cy="52" rx="40" ry="44" data-region="region-brain"/>
-                                <text class="anat-label" x="170" y="55">Brain</text>
+                                <!-- ── BODY SILHOUETTE ── -->
+                                <!-- Head -->
+                                <ellipse class="anat-silhouette" cx="200" cy="58" rx="42" ry="50"/>
+                                <!-- Neck -->
+                                <rect class="anat-silhouette" x="183" y="104" width="34" height="28" rx="6"/>
+                                <!-- Torso -->
+                                <path class="anat-silhouette"
+                                      d="M200,110 C230,110 260,118 268,135 L278,200 C285,240 282,290 270,330
+                                         L258,362 L242,362 L242,325 L158,325 L158,362 L142,362
+                                         L130,330 C118,290 115,240 122,200 L132,135 C140,118 170,110 200,110 Z"/>
+                                <!-- Left arm -->
+                                <path class="anat-silhouette"
+                                      d="M132,140 C115,138 98,142 90,158 L74,230 C70,248 76,262 86,264
+                                         L98,265 C108,263 112,250 116,232 L130,175 Z"/>
+                                <!-- Right arm -->
+                                <path class="anat-silhouette"
+                                      d="M268,140 C285,138 302,142 310,158 L326,230 C330,248 324,262 314,264
+                                         L302,265 C292,263 288,250 284,232 L270,175 Z"/>
+                                <!-- Left leg -->
+                                <path class="anat-silhouette"
+                                      d="M158,325 L142,362 L138,430 C136,470 138,520 142,560 L155,580
+                                         C160,588 168,588 172,580 L178,540 L182,360 L158,325 Z"/>
+                                <!-- Right leg -->
+                                <path class="anat-silhouette"
+                                      d="M242,325 L258,362 L262,430 C264,470 262,520 258,560 L245,580
+                                         C240,588 232,588 228,580 L222,540 L218,360 L242,325 Z"/>
 
-                                <!-- EYES -->
-                                <ellipse id="region-eye" class="anat-region" cx="155" cy="44" rx="7" ry="5" data-region="region-eye"/>
-                                <ellipse class="anat-region" cx="185" cy="44" rx="7" ry="5" data-region="region-eye" style="pointer-events:none;"/>
-                                <text class="anat-label" x="170" y="30">Eyes</text>
+                                <!-- ── SKIN overlay (full body, semi-transparent, clickable) ── -->
+                                <path id="region-skin" class="anat-region" data-region="region-skin"
+                                      fill="#fde68a" fill-opacity="0.30" stroke="#d97706" stroke-width="2"
+                                      d="M200,8 C225,8 245,20 245,20 C262,30 242,108 242,108
+                                         C258,112 278,130 278,130 L290,200 C296,240 294,292 282,334
+                                         L268,365 L248,365 L244,328 L222,328 L222,546 C222,580 226,590 226,590
+                                         L200,598 L174,590 C174,590 178,580 178,546 L178,328 L156,328 L152,365
+                                         L132,365 L118,334 C106,292 104,240 110,200 L122,130 C122,130 142,112 158,108
+                                         C158,108 138,30 155,20 C155,20 175,8 200,8 Z"/>
 
-                                <!-- NECK / LYMPH NODES -->
-                                <rect id="region-lymphnode" class="anat-region" x="155" y="95" width="30" height="22" rx="6" data-region="region-lymphnode"/>
-                                <text class="anat-label" x="170" y="109">Lymph</text>
+                                <!-- ── HEAD ORGANS ── -->
+                                <!-- Brain (occupies upper 2/3 of head) -->
+                                <ellipse id="region-brain" class="anat-region" data-region="region-brain"
+                                         cx="200" cy="50" rx="36" ry="38"
+                                         fill="#dbeafe" fill-opacity="0.85" stroke="#3b82f6" stroke-width="1.5"/>
+                                <!-- Eye (left+right, tiny) -->
+                                <ellipse id="region-eye" class="anat-region" data-region="region-eye"
+                                         cx="183" cy="60" rx="7" ry="5"
+                                         fill="#a5f3fc" fill-opacity="0.9" stroke="#0891b2" stroke-width="1.5"/>
+                                <ellipse class="anat-region" data-region="region-eye"
+                                         cx="217" cy="60" rx="7" ry="5"
+                                         fill="#a5f3fc" fill-opacity="0.9" stroke="#0891b2" stroke-width="1.5" style="pointer-events:none;"/>
 
-                                <!-- TORSO outline -->
-                                <rect x="120" y="118" width="100" height="210" rx="18" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+                                <!-- ── NECK ── -->
+                                <ellipse id="region-lymphnode" class="anat-region" data-region="region-lymphnode"
+                                         cx="200" cy="118" rx="14" ry="9"
+                                         fill="#d8b4fe" fill-opacity="0.8" stroke="#7c3aed" stroke-width="1.5"/>
 
-                                <!-- LUNG (left + right) -->
-                                <ellipse id="region-lung" class="anat-region" cx="145" cy="160" rx="22" ry="36" data-region="region-lung"/>
-                                <ellipse class="anat-region" cx="195" cy="160" rx="22" ry="36" data-region="region-lung" style="pointer-events:none;"/>
-                                <text class="anat-label" x="170" y="135">Lung</text>
-
-                                <!-- HEART -->
-                                <path id="region-heart" class="anat-region" data-region="region-heart"
-                                      d="M170,155 C170,155 155,143 148,150 C141,157 141,168 155,178 L170,192 L185,178 C199,168 199,157 192,150 C185,143 170,155 170,155 Z"/>
-                                <text class="anat-label" x="170" y="175">Heart</text>
-
-                                <!-- LIVER -->
-                                <ellipse id="region-liver" class="anat-region" cx="185" cy="210" rx="28" ry="20" data-region="region-liver"/>
-                                <text class="anat-label" x="186" y="213">Liver</text>
-
-                                <!-- PANCREAS -->
-                                <ellipse id="region-pancreas" class="anat-region" cx="148" cy="218" rx="20" ry="11" data-region="region-pancreas"/>
-                                <text class="anat-label" x="148" y="221">Pancreas</text>
-
-                                <!-- COLON / GUT -->
-                                <rect id="region-colon" class="anat-region" x="138" y="238" width="64" height="52" rx="10" data-region="region-colon"/>
-                                <text class="anat-label" x="170" y="268">Colon / Gut</text>
-
-                                <!-- BLOOD / BONE MARROW (represented as sternum area) -->
-                                <rect id="region-blood" class="anat-region" x="162" y="128" width="16" height="80" rx="4" data-region="region-blood"/>
-                                <text class="anat-label" x="170" y="122">Blood/BM</text>
-
-                                <!-- ARMS / MUSCLE (left arm) -->
-                                <rect id="region-muscle" class="anat-region" x="88" y="118" width="26" height="120" rx="12" data-region="region-muscle"/>
-                                <rect class="anat-region" x="226" y="118" width="26" height="120" rx="12" data-region="region-muscle" style="pointer-events:none;"/>
-                                <text class="anat-label" x="88" y="112">Muscle</text>
-
-                                <!-- SKIN (thin outer border strip) -->
-                                <rect id="region-skin" class="anat-region" x="115" y="115" width="110" height="218" rx="20"
-                                      fill="none" stroke="#fbbf24" stroke-width="5" data-region="region-skin" style="pointer-events:stroke;"/>
-                                <text class="anat-label" x="230" y="145" style="fill:#92400e;">Skin</text>
-
-                                <!-- KIDNEY (left + right) -->
-                                <ellipse id="region-kidney" class="anat-region" cx="138" cy="248" rx="12" ry="16" data-region="region-kidney"/>
-                                <ellipse class="anat-region" cx="202" cy="248" rx="12" ry="16" data-region="region-kidney" style="pointer-events:none;"/>
-                                <text class="anat-label" x="170" y="246">Kidney</text>
-
-                                <!-- LEGS / lower body -->
-                                <rect x="128" y="330" width="38" height="160" rx="12" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
-                                <rect x="174" y="330" width="38" height="160" rx="12" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
-
-                                <!-- PROSTATE / OVARY (pelvis) -->
-                                <ellipse id="region-prostate" class="anat-region" cx="155" cy="310" rx="18" ry="12" data-region="region-prostate"/>
-                                <ellipse id="region-ovary" class="anat-region" cx="185" cy="310" rx="18" ry="12" data-region="region-ovary"/>
-                                <text class="anat-label" x="155" y="313">Prostate</text>
-                                <text class="anat-label" x="185" y="313">Ovary</text>
-
-                                <!-- BREAST (chest, female marker) -->
-                                <ellipse id="region-breast" class="anat-region" cx="148" cy="175" rx="14" ry="12" data-region="region-breast"/>
-                                <ellipse class="anat-region" cx="192" cy="175" rx="14" ry="12" data-region="region-breast" style="pointer-events:none;"/>
-                                <text class="anat-label" x="170" y="192">Breast</text>
-
-                                <!-- Tooltip -->
-                                <g id="anat-tooltip" style="display:none; pointer-events:none;">
-                                    <rect id="anat-tt-bg" rx="6" fill="#1e293b" opacity="0.92"/>
-                                    <text id="anat-tt-text" fill="#f8fafc" font-size="10" font-family="sans-serif"/>
+                                <!-- ── TORSO ORGANS (clipped to torso) ── -->
+                                <g clip-path="url(#torso-clip)">
+                                    <!-- Lungs -->
+                                    <ellipse id="region-lung" class="anat-region" data-region="region-lung"
+                                             cx="172" cy="185" rx="28" ry="46"
+                                             fill="#bfdbfe" fill-opacity="0.85" stroke="#2563eb" stroke-width="1.5"/>
+                                    <ellipse class="anat-region" data-region="region-lung"
+                                             cx="228" cy="185" rx="28" ry="46"
+                                             fill="#bfdbfe" fill-opacity="0.85" stroke="#2563eb" stroke-width="1.5" style="pointer-events:none;"/>
+                                    <!-- Heart -->
+                                    <path id="region-heart" class="anat-region" data-region="region-heart"
+                                          fill="#fca5a5" fill-opacity="0.9" stroke="#dc2626" stroke-width="1.5"
+                                          d="M200,168 C200,168 188,156 180,160 C170,165 170,180 182,192 L200,210 L218,192 C230,180 230,165 220,160 C212,156 200,168 200,168 Z"/>
+                                    <!-- Breast (overlay on lower chest) -->
+                                    <ellipse id="region-breast" class="anat-region" data-region="region-breast"
+                                             cx="178" cy="215" rx="18" ry="14"
+                                             fill="#fbcfe8" fill-opacity="0.7" stroke="#db2777" stroke-width="1.5"/>
+                                    <ellipse class="anat-region" data-region="region-breast"
+                                             cx="222" cy="215" rx="18" ry="14"
+                                             fill="#fbcfe8" fill-opacity="0.7" stroke="#db2777" stroke-width="1.5" style="pointer-events:none;"/>
+                                    <!-- Liver (right upper abdomen) -->
+                                    <ellipse id="region-liver" class="anat-region" data-region="region-liver"
+                                             cx="224" cy="255" rx="32" ry="22"
+                                             fill="#fde68a" fill-opacity="0.85" stroke="#d97706" stroke-width="1.5"/>
+                                    <!-- Pancreas (left of liver) -->
+                                    <ellipse id="region-pancreas" class="anat-region" data-region="region-pancreas"
+                                             cx="176" cy="265" rx="24" ry="11"
+                                             fill="#fed7aa" fill-opacity="0.85" stroke="#ea580c" stroke-width="1.5"/>
+                                    <!-- Kidneys -->
+                                    <ellipse id="region-kidney" class="anat-region" data-region="region-kidney"
+                                             cx="166" cy="288" rx="14" ry="19"
+                                             fill="#bbf7d0" fill-opacity="0.85" stroke="#16a34a" stroke-width="1.5"/>
+                                    <ellipse class="anat-region" data-region="region-kidney"
+                                             cx="234" cy="288" rx="14" ry="19"
+                                             fill="#bbf7d0" fill-opacity="0.85" stroke="#16a34a" stroke-width="1.5" style="pointer-events:none;"/>
+                                    <!-- Colon / Gut -->
+                                    <path id="region-colon" class="anat-region" data-region="region-colon"
+                                          fill="#d1fae5" fill-opacity="0.85" stroke="#059669" stroke-width="1.5"
+                                          d="M168,295 Q200,290 232,295 Q248,310 244,330 Q240,348 200,348 Q160,348 156,330 Q152,310 168,295 Z"/>
+                                    <!-- Prostate (left of center pelvis) -->
+                                    <ellipse id="region-prostate" class="anat-region" data-region="region-prostate"
+                                             cx="182" cy="318" rx="16" ry="11"
+                                             fill="#e9d5ff" fill-opacity="0.85" stroke="#7c3aed" stroke-width="1.5"/>
+                                    <!-- Ovary (right of center pelvis) -->
+                                    <ellipse id="region-ovary" class="anat-region" data-region="region-ovary"
+                                             cx="218" cy="318" rx="16" ry="11"
+                                             fill="#fce7f3" fill-opacity="0.85" stroke="#be185d" stroke-width="1.5"/>
                                 </g>
+
+                                <!-- ── ARM MUSCLE (outside torso clip, so show in arms) ── -->
+                                <path id="region-muscle" class="anat-region" data-region="region-muscle"
+                                      fill="#fef9c3" fill-opacity="0.75" stroke="#ca8a04" stroke-width="1.5"
+                                      d="M98,155 C90,148 80,152 76,165 L66,218 C63,232 70,245 80,246
+                                         L92,247 C100,246 106,238 108,226 L122,172 Z"/>
+                                <path class="anat-region" data-region="region-muscle"
+                                      fill="#fef9c3" fill-opacity="0.75" stroke="#ca8a04" stroke-width="1.5"
+                                      d="M302,155 C310,148 320,152 324,165 L334,218 C337,232 330,245 320,246
+                                         L308,247 C300,246 294,238 292,226 L278,172 Z"
+                                      style="pointer-events:none;"/>
+
+                                <!-- ── BLOOD / BONE MARROW pill (bottom legend) ── -->
+                                <g id="region-blood" class="anat-pill" data-region="region-blood" transform="translate(60,660)">
+                                    <rect rx="12" width="170" height="28" fill="#fee2e2" fill-opacity="0.9" stroke="#ef4444" stroke-width="1.5"/>
+                                    <circle cx="22" cy="14" r="9" fill="#fca5a5" stroke="#ef4444" stroke-width="1.5"/>
+                                    <text x="40" y="18" font-size="10" font-family="'Segoe UI',sans-serif" fill="#991b1b" font-weight="bold">Blood / Bone Marrow</text>
+                                </g>
+
+                                <!-- ── LEADER LINES + EXTERNAL LABELS ── -->
+                                <!-- Layout: left labels x=20-95, right labels x=305-400, body centre x=200 -->
+
+                                <!-- Brain — top-left -->
+                                <line class="anat-leader" x1="164" y1="32" x2="95" y2="22"/>
+                                <rect class="anat-label-bg" x="4" y="14" width="90" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="8" y="25">Brain</text>
+
+                                <!-- Eye — top-right -->
+                                <line class="anat-leader" x1="224" y1="58" x2="310" y2="38"/>
+                                <rect class="anat-label-bg" x="308" y="30" width="42" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="312" y="41">Eyes</text>
+
+                                <!-- Skin — right, mid-upper -->
+                                <line class="anat-leader" x1="270" y1="120" x2="310" y2="105"/>
+                                <rect class="anat-label-bg" x="308" y="97" width="38" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="312" y="108" style="fill:#b45309;">Skin</text>
+
+                                <!-- Lymph Node — left -->
+                                <line class="anat-leader" x1="186" y1="118" x2="95" y2="118"/>
+                                <rect class="anat-label-bg" x="2" y="110" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="121">Lymph Nodes</text>
+
+                                <!-- Lung — left -->
+                                <line class="anat-leader" x1="144" y1="170" x2="95" y2="165"/>
+                                <rect class="anat-label-bg" x="2" y="157" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="168">Lung</text>
+
+                                <!-- Heart — left -->
+                                <line class="anat-leader" x1="180" y1="185" x2="95" y2="195"/>
+                                <rect class="anat-label-bg" x="2" y="187" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="198">Heart</text>
+
+                                <!-- Muscle — left arm -->
+                                <line class="anat-leader" x1="86" y1="195" x2="8" y2="215"/>
+                                <rect class="anat-label-bg" x="2" y="207" width="52" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="218">Muscle</text>
+
+                                <!-- Breast — right -->
+                                <line class="anat-leader" x1="240" y1="215" x2="305" y2="210"/>
+                                <rect class="anat-label-bg" x="303" y="202" width="50" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="307" y="213">Breast</text>
+
+                                <!-- Liver — right -->
+                                <line class="anat-leader" x1="256" y1="255" x2="305" y2="248"/>
+                                <rect class="anat-label-bg" x="303" y="240" width="44" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="307" y="251">Liver</text>
+
+                                <!-- Pancreas — left -->
+                                <line class="anat-leader" x1="152" y1="265" x2="95" y2="265"/>
+                                <rect class="anat-label-bg" x="2" y="257" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="268">Pancreas</text>
+
+                                <!-- Kidney — left -->
+                                <line class="anat-leader" x1="152" y1="290" x2="95" y2="295"/>
+                                <rect class="anat-label-bg" x="2" y="287" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="298">Kidney</text>
+
+                                <!-- Colon — right -->
+                                <line class="anat-leader" x1="245" y1="316" x2="305" y2="318"/>
+                                <rect class="anat-label-bg" x="303" y="310" width="72" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="307" y="321">Colon / Gut</text>
+
+                                <!-- Prostate — left -->
+                                <line class="anat-leader" x1="166" y1="322" x2="95" y2="335"/>
+                                <rect class="anat-label-bg" x="2" y="327" width="92" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="6" y="338">Prostate</text>
+
+                                <!-- Ovary — right -->
+                                <line class="anat-leader" x1="234" y1="322" x2="305" y2="348"/>
+                                <rect class="anat-label-bg" x="303" y="340" width="46" height="16" rx="3" fill="white" fill-opacity="0.85"/>
+                                <text class="anat-lbl" x="307" y="351">Ovary</text>
+
+                                <!-- Blood/BM pill label -->
+                                <text class="anat-lbl" x="250" y="674" font-size="9" fill="#64748b">(click to explore)</text>
                             </svg>
                         </div>
                     </div>
@@ -1453,8 +1587,8 @@
             document.getElementById('an-tissues').textContent = fmtNum(s.unique_tissues);
             document.getElementById('an-dbs').textContent     = s.num_databases;
 
-            // Wire SVG region clicks
-            document.querySelectorAll('.anat-region').forEach(el => {
+            // Wire SVG region clicks (both anat-region shapes and anat-pill groups)
+            document.querySelectorAll('.anat-region, .anat-pill').forEach(el => {
                 const regionId = el.dataset.region;
                 if (!regionId) return;
                 el.addEventListener('click', () => selectAnatomyRegion(regionId));
@@ -1464,10 +1598,10 @@
 
         function selectAnatomyRegion(regionId) {
             // Deselect all
-            document.querySelectorAll('.anat-region').forEach(el => {
+            document.querySelectorAll('.anat-region, .anat-pill').forEach(el => {
                 el.classList.remove('selected');
             });
-            // Select all paths for this region
+            // Select all shapes/pills for this region
             document.querySelectorAll('[data-region="' + regionId + '"]').forEach(el => {
                 el.classList.add('selected');
             });
