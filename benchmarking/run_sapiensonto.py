@@ -374,26 +374,26 @@ def run_visium_melanoma(skip_existing: bool) -> None:
     )
 
 
-def run_xenium_breast_cancer(skip_existing: bool) -> None:
-    data_dir = _DATA_DIR / "xenium_breast_cancer"
+def run_atera_breast_cancer(skip_existing: bool) -> None:
+    data_dir = _DATA_DIR / "atera_breast_cancer"
     if not data_dir.exists():
         logger.error(
-            "Xenium breast cancer data not found. "
-            "Run: python benchmarking/download_datasets.py --datasets xenium_breast_cancer"
+            "Atera breast cancer data not found. "
+            "Download WTA_Preview_FFPE_Breast_Cancer_outs.zip from S3 and extract to benchmarking/data/atera_breast_cancer/"
         )
         sys.exit(1)
 
     deg_csv = compute_xenium_degs(
-        data_dir, _RESULTS_DIR / "xenium_breast_cancer", skip_existing,
-        dataset_name="xenium_breast_cancer",
+        data_dir, _RESULTS_DIR / "atera_breast_cancer", skip_existing,
+        dataset_name="atera_breast_cancer",
     )
 
     run_annotation(
-        sample_name="xenium_breast_cancer",
+        sample_name="atera_breast_cancer",
         input_path=deg_csv,
         deg_type="spatial",
         output_dir=_RESULTS_DIR,
-        tissue="breast",            # DB has 'breast' tissue; covers ductal/lobular/stromal cell types
+        tissue="breast",
         deg_format="scanpy",
         skip_existing=skip_existing,
     )
@@ -407,7 +407,7 @@ RUNNERS = {
     "pbmc3k":               run_pbmc3k,
     "xenium_skin":          run_xenium_skin,
     "visium_melanoma":      run_visium_melanoma,
-    "xenium_breast_cancer": run_xenium_breast_cancer,
+    "atera_breast_cancer":  run_atera_breast_cancer,
 }
 
 

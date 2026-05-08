@@ -119,37 +119,13 @@ DATASETS = {
         ],
     },
 
-    "xenium_breast_cancer": {
-        "name": "Human Breast Cancer FFPE, Rep1 (Janesick et al. Nat Comms 2023)",
-        "platform": "Xenium (XOA 1.0.1)",
+    "atera_breast_cancer": {
+        "name": "Atera WTA Preview — FFPE Human Breast Cancer (10x Genomics dev preview)",
+        "platform": "Atera (10x Genomics, whole-transcriptome in situ)",
         "tissue": "Breast cancer (FFPE)",
-        "source": "https://www.10xgenomics.com/datasets/xenium-ffpe-human-breast-with-custom-add-on-panel-1-standard",
-        "files": [
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_cell_feature_matrix.h5",
-                "filename": "cell_feature_matrix.h5",
-                "extract": False,
-                "description": "Cell x gene expression matrix (HDF5)",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_cells.csv.gz",
-                "filename": "cells.csv.gz",
-                "extract": False,
-                "description": "Cell coordinates and metadata",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_analysis.zarr.zip",
-                "filename": "analysis.zarr.zip",
-                "extract": True,
-                "description": "Cluster assignments (Leiden/graph-based)",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_experiment.xenium",
-                "filename": "experiment.xenium",
-                "extract": False,
-                "description": "Experiment metadata (JSON)",
-            },
-        ],
+        "source": "https://www.10xgenomics.com/datasets/atera-wta-ffpe-human-cervical-cancer",
+        "note": "Manual download required — place extracted WTA_Preview_FFPE_Breast_Cancer_outs/ in benchmarking/data/atera_breast_cancer/",
+        "files": [],  # Downloaded manually from S3: s3-us-west-2.amazonaws.com/10x.files/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_outs.zip
     },
 }
 
