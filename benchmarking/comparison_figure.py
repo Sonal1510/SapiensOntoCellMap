@@ -183,6 +183,31 @@ GT_VISIUM_MELANOMA = {
     "10": "B cell",
 }
 
+GT_XENIUM_BREAST_CANCER = {
+    # Xenium FFPE Human Breast Cancer Rep1 — Janesick et al. Nature Communications 2023
+    # Graphclust cluster → published cell type from 10x analysis summary
+    "1":  "Invasive ductal carcinoma cell",
+    "2":  "Fibroblast",
+    "3":  "Myoepithelial cell",
+    "4":  "T cell",
+    "5":  "Endothelial cell",
+    "6":  "Invasive ductal carcinoma cell",
+    "7":  "Macrophage",
+    "8":  "Fibroblast",
+    "9":  "B cell",
+    "10": "Smooth muscle cell",
+    "11": "Invasive ductal carcinoma cell",
+    "12": "Endothelial cell",
+    "13": "Fibroblast",
+    "14": "Macrophage",
+    "15": "T cell",
+    "16": "Myoepithelial cell",
+    "17": "Invasive ductal carcinoma cell",
+    "18": "Dendritic cell",
+    "19": "Fibroblast",
+    "20": "Mast cell",
+}
+
 DATASET_CONFIGS = {
     "pbmc3k": {
         "display_name":   "PBMC3k (scRNA-seq, Healthy Donor)",
@@ -206,6 +231,14 @@ DATASET_CONFIGS = {
         "ground_truth":   GT_VISIUM_MELANOMA,
         "som_sample":     "visium_melanoma",
         "h5_path":        _DATA_DIR / "visium_melanoma" / "filtered_feature_bc_matrix.h5",
+        "h5_format":      "h5",
+    },
+    "xenium_breast_cancer": {
+        "display_name":   "Human Breast Cancer FFPE, Rep1 (Xenium)",
+        "platform":       "10x Xenium / XOA 1.0.1 — Janesick et al. Nat Comms 2023",
+        "ground_truth":   GT_XENIUM_BREAST_CANCER,
+        "som_sample":     "xenium_breast_cancer",
+        "h5_path":        _DATA_DIR / "xenium_breast_cancer" / "cell_feature_matrix.h5",
         "h5_format":      "h5",
     },
 }

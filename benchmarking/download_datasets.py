@@ -118,6 +118,39 @@ DATASETS = {
             },
         ],
     },
+
+    "xenium_breast_cancer": {
+        "name": "Human Breast Cancer FFPE, Rep1 (Janesick et al. Nat Comms 2023)",
+        "platform": "Xenium (XOA 1.0.1)",
+        "tissue": "Breast cancer (FFPE)",
+        "source": "https://www.10xgenomics.com/datasets/xenium-ffpe-human-breast-with-custom-add-on-panel-1-standard",
+        "files": [
+            {
+                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_cell_feature_matrix.h5",
+                "filename": "cell_feature_matrix.h5",
+                "extract": False,
+                "description": "Cell x gene expression matrix (HDF5)",
+            },
+            {
+                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_cells.csv.gz",
+                "filename": "cells.csv.gz",
+                "extract": False,
+                "description": "Cell coordinates and metadata",
+            },
+            {
+                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_analysis.zarr.zip",
+                "filename": "analysis.zarr.zip",
+                "extract": True,
+                "description": "Cluster assignments (Leiden/graph-based)",
+            },
+            {
+                "url": "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_experiment.xenium",
+                "filename": "experiment.xenium",
+                "extract": False,
+                "description": "Experiment metadata (JSON)",
+            },
+        ],
+    },
 }
 
 
@@ -236,7 +269,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Output directory : {output_dir.resolve()}")
-    logger.info(f"Datasets         : {', '.join(args.datasets)}")
+    logger.info(f"Datasets         : {', '.join(args.datasets)}")  # choices auto-derived from DATASETS keys
     logger.info(f"Skip existing    : {args.skip_existing}")
 
     for key in args.datasets:
