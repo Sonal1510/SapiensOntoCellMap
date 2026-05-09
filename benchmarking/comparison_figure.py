@@ -142,15 +142,29 @@ def _style_ax(ax):
 # cell type annotations for the spatial datasets.
 
 GT_PBMC3K = {
-    # Seurat PBMC3k tutorial cluster labels → ground truth
-    "1":  "CD4 T cell",
-    "2":  "CD14 Monocyte",
-    "3":  "B cell",
-    "4":  "CD8 T cell",
-    "5":  "NK cell",
-    "6":  "CD14 Monocyte",
-    "7":  "Dendritic cell",
-    "8":  "Megakaryocyte",
+    # CellRanger 1.x kmeans/8_clusters ordering — verified against mean counts in
+    # benchmarking/results/pbmc3k/pbmc3k_deg_converted.csv.
+    # Keys match summary_df["Cluster"] format ("Cluster N").
+    #
+    # Cluster sizes: C1=267, C2=470, C3=348, C4=1387, C5=1, C6=10, C7=1, C8=216
+    # C5/C6/C7 are tiny platelet/megakaryocyte micro-clusters (kmeans k=8 artefact).
+    #
+    # C4 label: large mixed T cell blob (naive CD4, memory CD4, CD8 all merged).
+    #   CD4 is NOT significantly upregulated vs other clusters (LFC=-92, p=1.0).
+    #   Key upregulated genes: CD3D, CD3E, IL7R, CCR7, LEF1, TCF7, CD8A, CD8B.
+    #   → "alpha-beta T cell" is the broadest correct label at this resolution.
+    #
+    # C5 (1 cell): GP9=16, GP1BA=2, ITGA2B=3, SDPR=44 → megakaryocyte (GP9+ distinguishes)
+    # C6 (10 cells): CLU=8.7, PPBP=46, GP9=3.9 → platelet (CLU dominant, GP9 low)
+    # C7 (1 cell): GP9=0, GP1BA=0, PPBP=22, TMSB4X=10, GNG11=9 → platelet (no megakaryocyte markers)
+    "Cluster 1":  "natural killer cell",   # NKG7, GNLY, GZMB, PRF1, FGFBP2
+    "Cluster 2":  "CD14-positive monocyte",  # S100A9, S100A8, LYZ, CD14, FCN1
+    "Cluster 3":  "B cell",                # CD79A, MS4A1, CD79B, HLA-DQA1, TCL1A
+    "Cluster 4":  "alpha-beta T cell",     # CD3D, CD3E, IL7R, CCR7, LEF1, TCF7, CD8A, CD8B
+    "Cluster 5":  "megakaryocyte",         # GP9=16, GP1BA=2, ITGA2B=3, SDPR=44, PPBP=36
+    "Cluster 6":  "platelet",              # PPBP=46, CLU=8.7, GNG11=10.6, GP9=3.9
+    "Cluster 7":  "platelet",              # PPBP=22, TMSB4X=10, GNG11=9 — GP9=0, GP1BA=0
+    "Cluster 8":  "non-classical monocyte",  # FCGR3A=6.4, LST1=15.6, MS4A7, AIF1, CDKN1C
 }
 
 GT_XENIUM_SKIN = {
@@ -189,6 +203,21 @@ GT_ATERA_BREAST_CANCER = {
     # in the downloaded WTA_Preview_FFPE_Breast_Cancer_outs/
 }
 
+# NOTE: GT_XENIUM_SKIN is barcode-level, not cluster-level.
+# Other datasets use cluster-id → label maps; this dataset uses per-barcode labels
+# from MOESM15 (Ext Data Fig 7 of the Shain lab paper). Comparison logic for this
+# dataset must join SOM leiden cluster assignments to the ground_truth.csv on barcode,
+# then aggregate per-cluster majority label before building the bubble matrix.
+# "Others" is excluded from accuracy calculation (mapped to None).
+GT_XENIUM_SKIN = {
+    "Adnexal":      "adnexal cell",
+    "Fibroblasts":  "fibroblast",
+    "Keratinocytes": "keratinocyte",
+    "Immune":       "immune cell",
+    "Melanocytes":  "melanocyte",
+    "Others":       None,  # exclude from accuracy calculation
+}
+
 DATASET_CONFIGS = {
     "pbmc3k": {
         "display_name":   "PBMC3k (scRNA-seq, Healthy Donor)",
@@ -197,14 +226,6 @@ DATASET_CONFIGS = {
         "som_sample":     "pbmc3k",
         "h5_path":        _DATA_DIR / "pbmc3k" / "filtered_gene_bc_matrices" / "hg19" / "matrix.mtx",
         "h5_format":      "mtx",
-    },
-    "xenium_skin": {
-        "display_name":   "Human Skin, Normal (Xenium)",
-        "platform":       "10x Xenium / XOA 1.9.0",
-        "ground_truth":   GT_XENIUM_SKIN,
-        "som_sample":     "xenium_skin",
-        "h5_path":        _DATA_DIR / "xenium_skin" / "cell_feature_matrix.h5",
-        "h5_format":      "h5",
     },
     "visium_melanoma": {
         "display_name":   "Human Skin Melanoma (Visium CytAssist)",
@@ -222,22 +243,45 @@ DATASET_CONFIGS = {
         "h5_path":        _DATA_DIR / "atera_breast_cancer" / "cell_feature_matrix.h5",
         "h5_format":      "h5",
     },
+    "xenium_skin": {
+        "display_name":   "Shain Lab Human Skin Xenium (GSM8734926, Section 1)",
+        "platform":       "10x Xenium / XOA 3.0.2",
+        "ground_truth":   GT_XENIUM_SKIN,
+        "gt_type":        "barcode",   # barcode-level GT — join on ground_truth.csv, not cluster-id map
+        "gt_csv":         _BENCH_DIR / "data" / "xenium_skin" / "shain_xenium" / "ground_truth.csv",
+        "som_sample":     "xenium_skin",
+        "h5_path":        _DATA_DIR / "xenium_skin" / "matrix.mtx.gz",
+        "h5_format":      "mtx_gz",
+    },
 }
 
 
 # ── Load SOM results ───────────────────────────────────────────────────────────
 
 def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (top_summary_df, sig_results_df)."""
-    sample_dir = _RESULTS_DIR / sample_name
-    summary_path = sample_dir / f"{sample_name}_top_annotation_summary.csv"
-    sig_path = sample_dir / f"{sample_name}_all_tissue_level2_sig_results.csv"
+    """Returns (top_summary_df, sig_results_df).
 
-    if not summary_path.exists():
-        logger.error(f"SOM results not found: {summary_path}")
+    Handles two possible output directory layouts:
+      - results/<sample>/<sample>_top_annotation_summary.csv  (flat)
+      - results/<sample>/<sample>/<sample>_top_annotation_summary.csv (nested, from run_annotation)
+    """
+    sample_dir_flat   = _RESULTS_DIR / sample_name
+    sample_dir_nested = _RESULTS_DIR / sample_name / sample_name
+
+    summary_path = None
+    for candidate_dir in [sample_dir_flat, sample_dir_nested]:
+        p = candidate_dir / f"{sample_name}_top_annotation_summary.csv"
+        if p.exists():
+            summary_path = p
+            sample_dir   = candidate_dir
+            break
+
+    if summary_path is None:
+        logger.error(f"SOM results not found: {sample_dir_flat / (sample_name + '_top_annotation_summary.csv')}")
         logger.error("Run: python benchmarking/run_sapiensonto.py first.")
         sys.exit(1)
 
+    sig_path = sample_dir / f"{sample_name}_all_tissue_level2_sig_results.csv"
     summary = pd.read_csv(summary_path)
     sig = pd.read_csv(sig_path) if sig_path.exists() else pd.DataFrame()
     return summary, sig
@@ -277,18 +321,34 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
             else:
                 raise ValueError(f"Unrecognised h5 structure in {h5_path}")
 
-    elif h5_format == "mtx":
+    elif h5_format in ("mtx", "mtx_gz"):
         try:
             from scipy.io import mmread
         except ImportError:
             logger.error("scipy required: pip install scipy")
             sys.exit(1)
+        import gzip
         mtx_dir  = h5_path.parent
-        X        = sp.csr_matrix(mmread(str(h5_path)).T)  # cells × genes
-        genes_f  = mtx_dir / "genes.tsv"
-        barcodes_f = mtx_dir / "barcodes.tsv"
-        gene_names = [l.strip().split("\t")[1] for l in open(genes_f)]
-        barcodes   = [l.strip() for l in open(barcodes_f)]
+        if h5_format == "mtx_gz":
+            with gzip.open(str(h5_path), "rb") as fh:
+                X = sp.csr_matrix(mmread(fh).T)  # cells × genes
+            # barcodes and features are also .gz in 10x MTX gz bundles
+            barcodes_f = mtx_dir / "barcodes.tsv.gz"
+            features_f = mtx_dir / "features.tsv.gz"
+            if barcodes_f.exists():
+                barcodes = [l.strip() for l in gzip.open(str(barcodes_f), "rt")]
+            else:
+                barcodes = [l.strip() for l in open(mtx_dir / "barcodes.tsv")]
+            if features_f.exists():
+                gene_names = [l.strip().split("\t")[1] for l in gzip.open(str(features_f), "rt")]
+            else:
+                gene_names = [l.strip().split("\t")[1] for l in open(mtx_dir / "features.tsv")]
+        else:
+            X        = sp.csr_matrix(mmread(str(h5_path)).T)  # cells × genes
+            genes_f  = mtx_dir / "genes.tsv"
+            barcodes_f = mtx_dir / "barcodes.tsv"
+            gene_names = [l.strip().split("\t")[1] for l in open(genes_f)]
+            barcodes   = [l.strip() for l in open(barcodes_f)]
     else:
         raise ValueError(f"Unknown h5_format: {h5_format}")
 
@@ -547,6 +607,83 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
               facecolor=P["bg_panel"])
 
 
+# ── Barcode-level GT join ──────────────────────────────────────────────────────
+
+def build_cluster_gt_from_barcodes(gt_csv: Path, cell_clusters_csv: Path,
+                                   gt_label_map: dict) -> dict:
+    """
+    Join barcode-level ground truth with Leiden cluster assignments.
+
+    For each Leiden cluster, assign the majority GT label (excluding "Others" / None).
+    Returns a dict: leiden_cluster_str → canonical_gt_label_str (CL-style label from gt_label_map).
+    Only clusters where a clear majority (>50% of labelled cells) can be assigned are included.
+    """
+    gt_df = pd.read_csv(gt_csv)        # columns: barcode, cell_type
+    cc_df = pd.read_csv(cell_clusters_csv)  # columns: barcode, cluster
+
+    # Normalise barcodes — Xenium barcodes may or may not have a suffix
+    def strip_suffix(bc):
+        # Remove trailing '-1' or similar digit suffixes added by CellRanger/Xenium
+        return bc.rsplit("-", 1)[0] if bc.rsplit("-", 1)[-1].isdigit() else bc
+
+    gt_df["barcode_norm"]  = gt_df["barcode"].apply(strip_suffix)
+    cc_df["barcode_norm"]  = cc_df["barcode"].apply(strip_suffix)
+
+    merged = cc_df.merge(gt_df[["barcode_norm", "cell_type"]], on="barcode_norm", how="left")
+    merged["cell_type"] = merged["cell_type"].fillna("Others")
+
+    cluster_to_gt = {}
+    for cluster, grp in merged.groupby("cluster"):
+        labelled = grp[grp["cell_type"] != "Others"]
+        if labelled.empty:
+            continue
+        majority_label = labelled["cell_type"].mode()[0]
+        majority_frac  = (labelled["cell_type"] == majority_label).sum() / len(grp)
+        canonical      = gt_label_map.get(majority_label)
+        if canonical is not None and majority_frac > 0.1:
+            cluster_to_gt[f"Cluster {cluster}"] = canonical
+    logger.info(f"Barcode GT join: {len(cluster_to_gt)} clusters assigned a majority GT label")
+    return cluster_to_gt
+
+
+# ── Accuracy computation ───────────────────────────────────────────────────────
+
+def compute_accuracy(summary_df: pd.DataFrame, ground_truth: dict) -> float:
+    """
+    Compute per-cluster accuracy using word-overlap between GT label and SOM Top_Cell_Type.
+    Returns fraction of clusters where GT and SOM share at least one word token.
+    Also logs per-cluster breakdown.
+    """
+    ct_col = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
+    broad_col = "Broad_Type" if "Broad_Type" in summary_df.columns else None
+    cluster_to_som = dict(zip(summary_df["Cluster"].astype(str), summary_df[ct_col]))
+    cluster_to_broad = {}
+    if broad_col:
+        cluster_to_broad = dict(zip(summary_df["Cluster"].astype(str), summary_df[broad_col]))
+
+    cluster_to_gt = {str(k): v for k, v in ground_truth.items() if v is not None}
+
+    n_match = 0
+    total   = 0
+    for cluster, gt in sorted(cluster_to_gt.items()):
+        som   = cluster_to_som.get(cluster, "Unannotated")
+        broad = cluster_to_broad.get(cluster, "")
+        gt_tok  = set(gt.lower().replace("-", " ").replace("+", " ").split())
+        som_tok = set(som.lower().replace("-", " ").replace("+", " ").split())
+        broad_tok = set(str(broad).lower().replace("-", " ").replace("+", " ").split())
+        match = bool(gt_tok & som_tok) or bool(gt_tok & broad_tok)
+        n_match += int(match)
+        total   += 1
+        logger.info(
+            f"  {cluster:12s} | GT: {gt:40s} | SOM: {_truncate(som, 45):45s} | "
+            f"Broad: {_truncate(str(broad), 35):35s} | {'MATCH' if match else 'MISMATCH'}"
+        )
+
+    accuracy = n_match / total if total > 0 else 0.0
+    logger.info(f"  Accuracy: {n_match}/{total} = {accuracy:.1%}")
+    return accuracy
+
+
 # ── Main figure builder ────────────────────────────────────────────────────────
 
 def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
@@ -556,6 +693,26 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
 
     summary_df, sig_df = load_som_results(cfg["som_sample"])
     ground_truth = cfg["ground_truth"]
+
+    # For barcode-level GT datasets, build cluster→GT map via majority-vote join
+    if cfg.get("gt_type") == "barcode":
+        gt_csv = cfg.get("gt_csv")
+        cell_clusters_csv = (
+            _RESULTS_DIR / cfg["som_sample"] / f"{cfg['som_sample']}_cell_clusters.csv"
+        )
+        if gt_csv and Path(gt_csv).exists() and cell_clusters_csv.exists():
+            ground_truth = build_cluster_gt_from_barcodes(
+                Path(gt_csv), cell_clusters_csv, ground_truth
+            )
+        else:
+            logger.warning(
+                f"Barcode GT join skipped — missing file(s): "
+                f"gt_csv={gt_csv}, cell_clusters={cell_clusters_csv}"
+            )
+
+    logger.info("Computing per-cluster accuracy ...")
+    accuracy = compute_accuracy(summary_df, ground_truth)
+    logger.info(f"Overall accuracy for {dataset_key}: {accuracy:.1%}")
 
     h5_path   = cfg["h5_path"]
     h5_format = cfg["h5_format"]

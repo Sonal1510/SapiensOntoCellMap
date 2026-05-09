@@ -2,16 +2,13 @@
 """
 SapiensOntoCellMap Benchmarking — Annotation Runner
 =====================================================
-Runs SapiensOntoCellMap on the 4 benchmark datasets downloaded by
-download_datasets.py. Handles DEG computation for datasets that need it
-(Xenium) and passes the correct input format for each platform.
+Runs SapiensOntoCellMap on the benchmark datasets downloaded by
+download_datasets.py.
 
 Datasets
 --------
-1. PBMC3k               — scRNA-seq  | DEG: CellRanger kmeans/8_clusters CSV (no graphclust in v1.1.0)
-2. Xenium Skin          — Xenium     | DEG: computed via scanpy Wilcoxon from cell_feature_matrix.h5
-3. Visium Melanoma      — Visium     | DEG: SpaceRanger graphclust CSV (in analysis.tar)
-4. Xenium Breast Cancer — Xenium     | DEG: computed via scanpy Wilcoxon from cell_feature_matrix.h5
+1. PBMC3k              — scRNA-seq  | DEG: CellRanger kmeans/8_clusters CSV (no graphclust in v1.1.0)
+2. Atera Breast Cancer — Atera WTA  | DEG: computed via scanpy Wilcoxon from cell_feature_matrix.h5
 
 Prerequisites
 -------------
@@ -20,7 +17,7 @@ Prerequisites
 Usage
 -----
     python benchmarking/run_sapiensonto.py
-    python benchmarking/run_sapiensonto.py --datasets pbmc3k xenium_skin
+    python benchmarking/run_sapiensonto.py --datasets pbmc3k
     python benchmarking/run_sapiensonto.py --skip_existing
 """
 
@@ -43,22 +40,51 @@ _MARKER_DB   = _PROJECT_DIR / "data" / "processed_combined_db" / "master_cell_ma
 
 
 # ---------------------------------------------------------------------------
-# DEG computation for Xenium (scanpy Wilcoxon)
+# CellRanger kmeans DEG path (PBMC3k)
 # ---------------------------------------------------------------------------
 
-def compute_xenium_degs(data_dir: Path, output_dir: Path, skip_existing: bool,
-                        dataset_name: str = "xenium") -> Path:
+def find_kmeans_deg(data_dir: Path, n_clusters: int = 8) -> Path:
     """
-    Compute Wilcoxon rank-sum DEGs per cluster from Xenium cell_feature_matrix.h5.
+    Locate the kmeans differential_expression.csv for a specific cluster count.
+    Used for PBMC3k (CellRanger 1.1.0), which has no graphclust output.
+    Prefers n_clusters; falls back to the closest available count.
+    """
+    target = f"{n_clusters}_clusters"
+    for root, dirs, files in os.walk(data_dir):
+        if "differential_expression.csv" in files and target in root:
+            return Path(root) / "differential_expression.csv"
 
-    Clusters are read from the analysis.zarr.zip contents, which download_datasets.py
-    extracts flat into data_dir (i.e. data_dir/.zgroup + data_dir/cell_groups/ exist).
-    The graphclust grouping is index 0 in cell_groups (group_names[0] has the most
-    clusters; grouping_names[0] == "gene_expression_graphclust" per .zattrs).
+    # Fallback: any kmeans differential_expression.csv
+    candidates = []
+    for root, dirs, files in os.walk(data_dir):
+        if "differential_expression.csv" in files and "kmeans" in root:
+            candidates.append(Path(root) / "differential_expression.csv")
+    if candidates:
+        candidates.sort()
+        chosen = candidates[len(candidates) // 2]
+        logger.warning(f"kmeans/{n_clusters}_clusters not found; using {chosen}")
+        return chosen
 
-    Falls back to leiden clustering if zarr is not readable.
+    logger.error(
+        f"Could not find kmeans/differential_expression.csv under {data_dir}.\n"
+        f"Make sure you ran download_datasets.py."
+    )
+    sys.exit(1)
 
-    Returns path to the saved DEG CSV (scanpy format).
+
+# ---------------------------------------------------------------------------
+# DEG computation for Atera (scanpy Wilcoxon from cell_feature_matrix.h5)
+# ---------------------------------------------------------------------------
+
+def compute_atera_degs(data_dir: Path, output_dir: Path, skip_existing: bool,
+                       dataset_name: str = "atera_breast_cancer") -> Path:
+    """
+    Compute Wilcoxon rank-sum DEGs per cluster from Atera cell_feature_matrix.h5.
+
+    Clusters are read from cell_groups.csv (per-barcode labels from 10x CF).
+    Saves DEG CSV (scanpy format) and barcode→cluster CSV for GT comparison.
+
+    Returns path to the saved DEG CSV.
     """
     deg_path = output_dir / f"{dataset_name}_degs.csv"
     if deg_path.exists() and skip_existing:
@@ -68,109 +94,47 @@ def compute_xenium_degs(data_dir: Path, output_dir: Path, skip_existing: bool,
     try:
         import scanpy as sc
         import pandas as pd
-        import numpy as np
     except ImportError as e:
         logger.error(f"Missing dependency: {e}. Install: pip install scanpy")
         sys.exit(1)
-    import json   # stdlib — always available
-    import zarr   # required for blosc/lz4 decompression of chunk data
 
-    h5_path = data_dir / "cell_feature_matrix.h5"
+    h5_path        = data_dir / "cell_feature_matrix.h5"
+    cell_groups_path = data_dir / "cell_groups.csv"
 
-    if not h5_path.exists():
-        logger.error(f"cell_feature_matrix.h5 not found at {h5_path}. Run download_datasets.py first.")
-        sys.exit(1)
+    for p in [h5_path, cell_groups_path]:
+        if not p.exists():
+            logger.error(f"{p.name} not found at {p}.")
+            sys.exit(1)
 
-    logger.info("Loading Xenium cell_feature_matrix.h5 ...")
+    logger.info("Loading Atera cell_feature_matrix.h5 ...")
     adata = sc.read_10x_h5(str(h5_path))
     adata.var_names_make_unique()
+    logger.info(f"  {adata.n_obs:,} cells × {adata.n_vars:,} genes")
 
-    # ---------------------------------------------------------------------------
-    # Load cluster assignments from zarr.
-    # download_datasets.py extracts analysis.zarr.zip flat into data_dir, so
-    # data_dir itself IS the zarr store root (.zgroup lives directly in data_dir).
-    #
-    # Store layout (Xenium XOA format):
-    #   data_dir/cell_groups/.zattrs  — grouping_names[], group_names[][]
-    #   data_dir/cell_groups/<i>/     — sparse CSR membership arrays
-    #     indptr/0  (blosc-compressed uint32) — length n_clusters+1
-    #     indices/0 (blosc-compressed uint32) — cell indices in each cluster
-    #
-    # grouping_names[0] == "gene_expression_graphclust" (highest-resolution)
-    # group_names[0]    == list of "Cluster 1", "Cluster 2", ...
-    # ---------------------------------------------------------------------------
-    cluster_labels = None
-    zgroup_path = data_dir / ".zgroup"
-    if zgroup_path.exists():
-        logger.info("Loading cluster assignments from zarr store at data_dir ...")
-        try:
-            zattrs_path = data_dir / "cell_groups" / ".zattrs"
-            with open(zattrs_path) as f:
-                zattrs = json.load(f)
-            grouping_names = zattrs.get("grouping_names", [])
-            # Find graphclust grouping index (usually 0)
-            graphclust_idx = 0
-            for i, name in enumerate(grouping_names):
-                if "graphclust" in name:
-                    graphclust_idx = i
-                    break
-            logger.info(
-                f"Using grouping index {graphclust_idx}: "
-                f"{grouping_names[graphclust_idx] if grouping_names else 'unknown'}"
-            )
+    logger.info("Loading cluster assignments from cell_groups.csv ...")
+    cg = pd.read_csv(cell_groups_path)
+    # Expected columns: Barcode, Group (cell type label)
+    barcode_col = next((c for c in cg.columns if "barcode" in c.lower()), cg.columns[0])
+    group_col   = next((c for c in cg.columns if "group" in c.lower() or "cell" in c.lower()
+                        and c != barcode_col), cg.columns[1])
+    cg = cg.rename(columns={barcode_col: "barcode", group_col: "cluster"})
+    cg = cg.set_index("barcode")["cluster"]
 
-            group_names = zattrs["group_names"][graphclust_idx]
-            n_clusters  = len(group_names)
-
-            # Open the zarr store (data_dir = zarr root) to decode compressed chunks
-            z_store = zarr.open(str(data_dir), mode="r")
-            indptr  = z_store["cell_groups"][str(graphclust_idx)]["indptr"][:]
-            indices = z_store["cell_groups"][str(graphclust_idx)]["indices"][:]
-
-            # Build cell_index → cluster_label map (1-based cluster labels)
-            cell_to_cluster: dict[int, str] = {}
-            for c_idx in range(n_clusters):
-                start = int(indptr[c_idx])
-                end   = int(indptr[c_idx + 1])
-                for cell_idx in indices[start:end]:
-                    cell_to_cluster[int(cell_idx)] = str(c_idx + 1)
-
-            # Align to adata obs order by positional index
-            cluster_labels = {}
-            for pos, bc in enumerate(adata.obs_names):
-                if pos in cell_to_cluster:
-                    cluster_labels[bc] = cell_to_cluster[pos]
-            logger.info(
-                f"Loaded {len(cluster_labels):,} cell→cluster assignments "
-                f"({n_clusters} clusters)"
-            )
-        except Exception as e:
-            logger.warning(f"Could not read zarr clusters: {e} — falling back to leiden clustering")
-
-    if cluster_labels:
-        # Align cluster labels to adata order
-        adata.obs["cluster"] = [cluster_labels.get(bc, "NA") for bc in adata.obs_names]
-        adata.obs["cluster"] = adata.obs["cluster"].astype("category")
-        adata = adata[adata.obs["cluster"] != "NA"].copy()
-        groupby_col = "cluster"
-    else:
-        logger.info("Running leiden clustering (no pre-computed clusters found) ...")
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-        sc.pp.pca(adata, n_comps=30)
-        sc.pp.neighbors(adata)
-        sc.tl.leiden(adata, resolution=0.5)
-        groupby_col = "leiden"
+    adata.obs["cluster"] = cg.reindex(adata.obs_names).values
+    n_missing = adata.obs["cluster"].isna().sum()
+    if n_missing > 0:
+        logger.warning(f"  {n_missing:,} cells not in cell_groups.csv — dropping")
+        adata = adata[adata.obs["cluster"].notna()].copy()
+    adata.obs["cluster"] = adata.obs["cluster"].astype("category")
+    logger.info(f"  {adata.n_obs:,} cells across {adata.obs['cluster'].nunique()} clusters")
 
     logger.info("Normalising counts ...")
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
 
-    logger.info(f"Computing Wilcoxon DEGs per cluster ({adata.obs[groupby_col].nunique()} clusters) ...")
-    sc.tl.rank_genes_groups(adata, groupby=groupby_col, method="wilcoxon", use_raw=False)
+    logger.info(f"Computing Wilcoxon DEGs ({adata.obs['cluster'].nunique()} clusters) ...")
+    sc.tl.rank_genes_groups(adata, groupby="cluster", method="wilcoxon", use_raw=False)
 
-    # Export in scanpy format (names, scores, pvals_adj, logfoldchanges per cluster)
     logger.info("Exporting DEG CSV ...")
     results = adata.uns["rank_genes_groups"]
     groups  = results["names"].dtype.names
@@ -190,62 +154,19 @@ def compute_xenium_degs(data_dir: Path, output_dir: Path, skip_existing: bool,
                 "group":          grp,
             })
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     deg_df = pd.DataFrame(rows)
     deg_df.to_csv(deg_path, index=False)
     logger.info(f"DEGs saved: {deg_path}  ({len(deg_df):,} rows)")
+
+    cell_assignments_path = output_dir / f"{dataset_name}_cell_clusters.csv"
+    pd.DataFrame({
+        "barcode": adata.obs_names,
+        "cluster": adata.obs["cluster"].astype(str),
+    }).to_csv(cell_assignments_path, index=False)
+    logger.info(f"Cell cluster assignments saved: {cell_assignments_path}")
+
     return deg_path
-
-
-# ---------------------------------------------------------------------------
-# SpaceRanger / CellRanger graphclust DEG path
-# ---------------------------------------------------------------------------
-
-def find_graphclust_deg(data_dir: Path, dataset_key: str) -> Path:
-    """
-    Locate the graphclust differential_expression.csv inside an extracted
-    analysis directory. Works for SpaceRanger (Visium).
-
-    NOTE: CellRanger 1.1.0 (PBMC3k) does NOT produce a graphclust output —
-    use find_kmeans_deg() instead for that dataset.
-    """
-    for root, dirs, files in os.walk(data_dir):
-        if "differential_expression.csv" in files and "_graphclust" in root:
-            return Path(root) / "differential_expression.csv"
-    logger.error(
-        f"Could not find graphclust/differential_expression.csv under {data_dir}.\n"
-        f"Make sure you ran download_datasets.py (which extracts the analysis tar)."
-    )
-    sys.exit(1)
-
-
-def find_kmeans_deg(data_dir: Path, n_clusters: int = 8) -> Path:
-    """
-    Locate the kmeans differential_expression.csv for a specific cluster count.
-    Used for PBMC3k (CellRanger 1.1.0), which has no graphclust output.
-    Prefers n_clusters; falls back to the closest available count.
-    """
-    target = f"{n_clusters}_clusters"
-    for root, dirs, files in os.walk(data_dir):
-        if "differential_expression.csv" in files and target in root:
-            return Path(root) / "differential_expression.csv"
-
-    # Fallback: any kmeans differential_expression.csv
-    candidates = []
-    for root, dirs, files in os.walk(data_dir):
-        if "differential_expression.csv" in files and "kmeans" in root:
-            candidates.append(Path(root) / "differential_expression.csv")
-    if candidates:
-        # Pick one closest to requested n_clusters by sorting path strings
-        candidates.sort()
-        chosen = candidates[len(candidates) // 2]  # middle element as heuristic
-        logger.warning(f"kmeans/{n_clusters}_clusters not found; using {chosen}")
-        return chosen
-
-    logger.error(
-        f"Could not find kmeans/differential_expression.csv under {data_dir}.\n"
-        f"Make sure you ran download_datasets.py."
-    )
-    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +183,8 @@ def run_annotation(
     background_n: int = None,
     skip_existing: bool = False,
 ) -> Path:
-    """
-    Call get_cluster_annotation.py CLI and return the output directory.
-    """
-    sample_out = output_dir / sample_name
+    """Call get_cluster_annotation.py CLI and return the output directory."""
+    sample_out  = output_dir / sample_name
     summary_csv = sample_out / f"{sample_name}_top_annotation_summary.csv"
 
     if summary_csv.exists() and skip_existing:
@@ -283,7 +202,6 @@ def run_annotation(
         f"--marker_db={_MARKER_DB}",
         "--tissue_priority_ratio=0.3",
     ]
-
     if tissue:
         cmd.append(f"--tissue={tissue}")
     if deg_format:
@@ -310,66 +228,63 @@ def run_annotation(
 # Per-dataset logic
 # ---------------------------------------------------------------------------
 
+def convert_cellranger_v1_to_standard(src_csv: Path, out_csv: Path) -> Path:
+    """
+    Convert CellRanger 1.x wide-format DEG CSV to standard Visium-style format.
+
+    CellRanger 1.x columns: Gene ID, Gene Name, Cluster N Weight, Cluster N UMI counts/cell
+    Output columns:         Feature ID, Feature Name, Cluster N Log2 fold change,
+                            Cluster N Adjusted p value, Cluster N Mean Counts
+
+    No adjusted p-values exist in CellRanger 1.x — p=0.0001 for positive Weight, p=1.0 otherwise.
+    """
+    if out_csv.exists():
+        logger.info(f"Using cached converted DEG file: {out_csv}")
+        return out_csv
+
+    import pandas as pd
+    import re
+
+    df = pd.read_csv(src_csv)
+    df.rename(columns={"Gene ID": "Feature ID", "Gene Name": "Feature Name"}, inplace=True)
+
+    weight_cols  = [c for c in df.columns if re.match(r"Cluster \d+ Weight", c)]
+    cluster_nums = [re.search(r"Cluster (\d+) Weight", c).group(1) for c in weight_cols]
+
+    result = df[["Feature ID", "Feature Name"]].copy()
+    for n in cluster_nums:
+        w = df[f"Cluster {n} Weight"]
+        umi_col = f"Cluster {n} UMI counts/cell"
+        result[f"Cluster {n} Log2 fold change"] = w
+        result[f"Cluster {n} Adjusted p value"] = w.apply(lambda x: 0.0001 if x > 0 else 1.0)
+        result[f"Cluster {n} Mean Counts"]      = df[umi_col] if umi_col in df.columns else 0.0
+
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(out_csv, index=False)
+    logger.info(f"Converted CellRanger v1 DEG to standard format: {out_csv}  ({len(result):,} genes)")
+    return out_csv
+
+
 def run_pbmc3k(skip_existing: bool) -> None:
     data_dir = _DATA_DIR / "pbmc3k"
     if not data_dir.exists():
         logger.error("PBMC3k data not found. Run: python benchmarking/download_datasets.py --datasets pbmc3k")
         sys.exit(1)
 
-    # CellRanger 1.1.0 does not produce graphclust output — use kmeans 8_clusters
-    deg_csv = find_kmeans_deg(data_dir, n_clusters=8)
-    logger.info(f"PBMC3k DEG file: {deg_csv}")
+    raw_deg_csv   = find_kmeans_deg(data_dir, n_clusters=8)
+    logger.info(f"PBMC3k DEG file: {raw_deg_csv}")
+
+    converted_csv = _RESULTS_DIR / "pbmc3k" / "pbmc3k_deg_converted.csv"
+    deg_csv       = convert_cellranger_v1_to_standard(raw_deg_csv, converted_csv)
 
     run_annotation(
         sample_name="pbmc3k",
         input_path=deg_csv,
-        deg_type="scrna",
-        output_dir=_RESULTS_DIR,
-        tissue=None,                  # pan-tissue — PBMCs are blood, use all-tissue
-        deg_format="generic",         # CellRanger 1.x kmeans format (same wide-format as graphclust)
-        background_n=20000,           # full transcriptome background
-        skip_existing=skip_existing,
-    )
-
-
-def run_xenium_skin(skip_existing: bool) -> None:
-    data_dir = _DATA_DIR / "xenium_skin"
-    if not data_dir.exists():
-        logger.error("Xenium skin data not found. Run: python benchmarking/download_datasets.py --datasets xenium_skin")
-        sys.exit(1)
-
-    deg_csv = compute_xenium_degs(
-        data_dir, _RESULTS_DIR / "xenium_skin", skip_existing,
-        dataset_name="xenium_skin",
-    )
-
-    run_annotation(
-        sample_name="xenium_skin",
-        input_path=deg_csv,
         deg_type="spatial",
         output_dir=_RESULTS_DIR,
-        tissue="skin",
-        deg_format="scanpy",
-        skip_existing=skip_existing,
-    )
-
-
-def run_visium_melanoma(skip_existing: bool) -> None:
-    data_dir = _DATA_DIR / "visium_melanoma"
-    if not data_dir.exists():
-        logger.error("Visium melanoma data not found. Run: python benchmarking/download_datasets.py --datasets visium_melanoma")
-        sys.exit(1)
-
-    deg_csv = find_graphclust_deg(data_dir, "visium_melanoma")
-    logger.info(f"Visium Melanoma DEG file: {deg_csv}")
-
-    run_annotation(
-        sample_name="visium_melanoma",
-        input_path=deg_csv,
-        deg_type="spatial",
-        output_dir=_RESULTS_DIR,
-        tissue="skin",
-        deg_format="generic",
+        tissue=None,
+        deg_format=None,
+        background_n=20000,
         skip_existing=skip_existing,
     )
 
@@ -379,19 +294,17 @@ def run_atera_breast_cancer(skip_existing: bool) -> None:
     if not data_dir.exists():
         logger.error(
             "Atera breast cancer data not found. "
-            "Download WTA_Preview_FFPE_Breast_Cancer_outs.zip from S3 and extract to benchmarking/data/atera_breast_cancer/"
+            "Extract WTA_Preview_FFPE_Breast_Cancer_outs.zip to benchmarking/data/atera_breast_cancer/"
         )
         sys.exit(1)
 
-    deg_csv = compute_xenium_degs(
-        data_dir, _RESULTS_DIR / "atera_breast_cancer", skip_existing,
-        dataset_name="atera_breast_cancer",
-    )
+    out_dir = _RESULTS_DIR / "atera_breast_cancer"
+    deg_csv = compute_atera_degs(data_dir, out_dir, skip_existing, dataset_name="atera_breast_cancer")
 
     run_annotation(
         sample_name="atera_breast_cancer",
         input_path=deg_csv,
-        deg_type="spatial",
+        deg_type="scrna",
         output_dir=_RESULTS_DIR,
         tissue="breast",
         deg_format="scanpy",
@@ -404,10 +317,8 @@ def run_atera_breast_cancer(skip_existing: bool) -> None:
 # ---------------------------------------------------------------------------
 
 RUNNERS = {
-    "pbmc3k":               run_pbmc3k,
-    "xenium_skin":          run_xenium_skin,
-    "visium_melanoma":      run_visium_melanoma,
-    "atera_breast_cancer":  run_atera_breast_cancer,
+    "pbmc3k":              run_pbmc3k,
+    "atera_breast_cancer": run_atera_breast_cancer,
 }
 
 
@@ -420,7 +331,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=list(RUNNERS.keys()),
         default=list(RUNNERS.keys()),
-        help="Which datasets to annotate (default: all 4)",
+        help="Which datasets to annotate (default: all)",
     )
     parser.add_argument(
         "--skip_existing",

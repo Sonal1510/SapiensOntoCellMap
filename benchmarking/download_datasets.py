@@ -2,19 +2,18 @@
 """
 SapiensOntoCellMap Benchmarking — Dataset Downloader
 =====================================================
-Downloads processed (CellRanger/SpaceRanger/Xenium) output files for the
-3 public benchmark datasets. All files are freely accessible without login.
+Downloads processed (CellRanger/Atera) output files for the benchmark datasets.
+All files are freely accessible without login.
 
 Datasets
 --------
-1. PBMC3k          — 3k PBMCs from a Healthy Donor (10x Chromium, CellRanger 1.1.0)
-2. Xenium Skin     — Human Skin, non-diseased, section 1 (Xenium 1.9.0)
-3. Visium Melanoma — Human Melanoma IF Stained FFPE (CytAssist SpaceRanger 2.0.0)
+1. PBMC3k              — 3k PBMCs from a Healthy Donor (10x Chromium, CellRanger 1.1.0)
+2. Atera Breast Cancer — WTA Preview FFPE Human Breast Cancer (10x Atera, manual download)
 
 Usage
 -----
     python benchmarking/download_datasets.py
-    python benchmarking/download_datasets.py --datasets pbmc3k xenium_skin
+    python benchmarking/download_datasets.py --datasets pbmc3k
     python benchmarking/download_datasets.py --output_dir /path/to/data
     python benchmarking/download_datasets.py --skip_existing      # skip already-downloaded files
 """
@@ -59,73 +58,17 @@ DATASETS = {
         ],
     },
 
-    "xenium_skin": {
-        "name": "Human Skin, Non-Diseased, Section 1 (Xenium Multi-Tissue Panel)",
-        "platform": "Xenium (XOA 1.9.0)",
-        "tissue": "Skin (normal FFPE)",
-        "source": "https://www.10xgenomics.com/datasets/human-skin-data-xenium-human-multi-tissue-and-cancer-panel-1-standard",
-        "files": [
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.9.0/Xenium_V1_hSkin_nondiseased_section_1_FFPE/Xenium_V1_hSkin_nondiseased_section_1_FFPE_cell_feature_matrix.h5",
-                "filename": "cell_feature_matrix.h5",
-                "extract": False,
-                "description": "Cell x gene expression matrix (HDF5)",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.9.0/Xenium_V1_hSkin_nondiseased_section_1_FFPE/Xenium_V1_hSkin_nondiseased_section_1_FFPE_cells.csv.gz",
-                "filename": "cells.csv.gz",
-                "extract": False,
-                "description": "Cell coordinates and metadata",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.9.0/Xenium_V1_hSkin_nondiseased_section_1_FFPE/Xenium_V1_hSkin_nondiseased_section_1_FFPE_analysis.zarr.zip",
-                "filename": "analysis.zarr.zip",
-                "extract": True,
-                "description": "Cluster assignments (Leiden/graph-based)",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/xenium/1.9.0/Xenium_V1_hSkin_nondiseased_section_1_FFPE/Xenium_V1_hSkin_nondiseased_section_1_FFPE_experiment.xenium",
-                "filename": "experiment.xenium",
-                "extract": False,
-                "description": "Experiment metadata (JSON)",
-            },
-        ],
-    },
-
-    "visium_melanoma": {
-        "name": "Human Melanoma, IF Stained (FFPE)",
-        "platform": "Visium CytAssist (SpaceRanger 2.0.0)",
-        "tissue": "Skin melanoma (FFPE)",
-        "source": "https://www.10xgenomics.com/datasets/human-melanoma-if-stained-ffpe-2-standard",
-        "files": [
-            {
-                "url": "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Skin_Melanoma/CytAssist_FFPE_Human_Skin_Melanoma_filtered_feature_bc_matrix.h5",
-                "filename": "filtered_feature_bc_matrix.h5",
-                "extract": False,
-                "description": "Filtered spot x gene matrix (HDF5)",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Skin_Melanoma/CytAssist_FFPE_Human_Skin_Melanoma_spatial.tar.gz",
-                "filename": "spatial.tar.gz",
-                "extract": True,
-                "description": "Spatial coordinates + tissue image",
-            },
-            {
-                "url": "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Skin_Melanoma/CytAssist_FFPE_Human_Skin_Melanoma_analysis.tar.gz",
-                "filename": "analysis.tar.gz",
-                "extract": True,
-                "description": "Cluster assignments + differential expression",
-            },
-        ],
-    },
-
     "atera_breast_cancer": {
         "name": "Atera WTA Preview — FFPE Human Breast Cancer (10x Genomics dev preview)",
         "platform": "Atera (10x Genomics, whole-transcriptome in situ)",
         "tissue": "Breast cancer (FFPE)",
-        "source": "https://www.10xgenomics.com/datasets/atera-wta-ffpe-human-cervical-cancer",
-        "note": "Manual download required — place extracted WTA_Preview_FFPE_Breast_Cancer_outs/ in benchmarking/data/atera_breast_cancer/",
-        "files": [],  # Downloaded manually from S3: s3-us-west-2.amazonaws.com/10x.files/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_outs.zip
+        "source": "https://s3-us-west-2.amazonaws.com/10x.files/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_outs.zip",
+        "note": (
+            "Data manually downloaded from S3 and stored on NAS at "
+            "/Volumes/shainlab/Sonal/sapiensontocellmap_atera/. "
+            "Will be deposited on Zenodo. Not auto-downloadable."
+        ),
+        "files": [],
     },
 }
 
@@ -224,7 +167,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=list(DATASETS.keys()),
         default=list(DATASETS.keys()),
-        help="Which datasets to download (default: all 3)",
+        help="Which datasets to download (default: all)",
     )
     parser.add_argument(
         "--output_dir",

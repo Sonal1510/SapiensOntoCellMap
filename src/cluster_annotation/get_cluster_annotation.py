@@ -319,8 +319,11 @@ def find_deg_files(input_path, sample_name, deg_type):
         else:
             logger.error(f"For --deg_type scrna, the input path must be a valid .csv file. Got: {input_path}")
     else:
-        if os.path.isdir(input_path):
-            path_map = get_spaceranger_differential_cluster_file_path(input_path, sample_name)    
+        if os.path.isfile(input_path) and input_path.endswith(".csv"):
+            # Direct CSV path for spatial type (e.g. pre-converted CellRanger v1 format)
+            path_map[sample_name] = input_path
+        elif os.path.isdir(input_path):
+            path_map = get_spaceranger_differential_cluster_file_path(input_path, sample_name)
     if not path_map:
         logger.warning(f"No spatial differential_expression.csv files found in {input_path}")
     return path_map
