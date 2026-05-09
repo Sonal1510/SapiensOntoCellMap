@@ -2,7 +2,7 @@
 
 Ontology-aware hierarchical cell type annotation for single-cell and spatial transcriptomics.
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey) [![DOI](https://zenodo.org/badge/1038735170.svg)](https://doi.org/10.5281/zenodo.20091879)
 
 ---
 
