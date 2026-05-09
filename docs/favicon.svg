@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Background: deep indigo, rounded square -->
+  <rect width="64" height="64" rx="10" fill="#1a237e"/>
+
+  <!--
+    The S: built from two semicircular arcs sharing a midpoint at (32, 32).
+    Top arc curves right-to-left, bottom arc curves left-to-right.
+    Stroke-based so it scales cleanly.
+
+    S path:
+      Start top-right of upper arc: (42, 16)
+      Upper arc: sweeps left to (22, 28)  — center ~(32,16), radius ~12
+      Lower arc: sweeps right from (22,28) to (42, 40) — center ~(32,40), radius ~12
+      Then the tail drops straight down from (42,40) to ~(36,47)
+      Then forks: left branch to (28,57), right branch to (44,57)
+  -->
+
+  <!-- S stroke (the letter body) -->
+  <path
+    d="M 42,15
+       A 11,11 0 0 0 21,15
+       A 11,11 0 0 0 21,26
+       A 11,11 0 0 0 43,26
+       A 11,11 0 0 0 43,37
+       A 11,11 0 0 0 22,37"
+    fill="none"
+    stroke="white"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Fork stem: from bottom of S down -->
+  <line x1="22" y1="37" x2="22" y2="45" stroke="white" stroke-width="5.5" stroke-linecap="round"/>
+
+  <!-- Left branch tip -->
+  <line x1="22" y1="45" x2="14" y2="56" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Right branch tip -->
+  <line x1="22" y1="45" x2="30" y2="56" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Small terminal dots on branch tips (the child nodes) -->
+  <circle cx="14" cy="57" r="2.5" fill="white"/>
+  <circle cx="30" cy="57" r="2.5" fill="white"/>
+</svg>

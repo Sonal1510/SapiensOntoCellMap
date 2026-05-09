@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SapiensOntoCellMap — Ontology-Aware Cell Type Annotation</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.svg" />
   <!-- DNS prefetch + preconnect for CDN resources -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -61,11 +63,22 @@
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     }
     .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
       font-weight: 700;
       font-size: 1rem;
       color: #fff;
       letter-spacing: -0.02em;
       white-space: nowrap;
+      text-decoration: none;
+    }
+    .nav-brand:hover { text-decoration: none; color: #fff; }
+    .nav-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      flex-shrink: 0;
     }
     .nav-links {
       display: flex;
@@ -649,19 +662,95 @@
       font-size: 0.78rem;
     }
 
+    /* ── Hamburger ── */
+    .nav-hamburger {
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+      width: 36px;
+      height: 36px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .nav-hamburger:hover { background: rgba(255,255,255,0.12); }
+    .nav-hamburger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: #fff;
+      border-radius: 2px;
+      transition: transform 0.25s, opacity 0.25s;
+    }
+    .nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-hamburger.open span:nth-child(2) { opacity: 0; }
+    .nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    /* Mobile nav drawer */
+    .nav-mobile-menu {
+      display: none;
+      position: fixed;
+      top: 56px;
+      left: 0;
+      right: 0;
+      background: rgba(26, 35, 126, 0.98);
+      backdrop-filter: blur(8px);
+      z-index: 99;
+      padding: 0.5rem 1rem 1rem;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      list-style: none;
+    }
+    .nav-mobile-menu.open { display: block; }
+    .nav-mobile-menu li { border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .nav-mobile-menu li:last-child { border-bottom: none; }
+    .nav-mobile-menu a {
+      display: block;
+      color: rgba(255,255,255,0.9);
+      font-size: 1rem;
+      font-weight: 500;
+      padding: 0.85rem 0.5rem;
+      transition: color 0.15s;
+    }
+    .nav-mobile-menu a:hover { color: #fff; text-decoration: none; }
+
     /* ── Responsive ── */
     @media (max-width: 800px) {
       .what-grid, .phase-grid, .bench-grid, .cite-grid { grid-template-columns: 1fr; }
       .steps-grid { grid-template-columns: 1fr; }
       nav { padding: 0 1rem; }
-      .nav-brand { font-size: 0.85rem; }
+      .nav-brand { font-size: 0.9rem; }
       .nav-links a { font-size: 0.75rem; padding: 0.3rem 0.5rem; }
       section { padding: 3.5rem 1rem; }
       #hero { padding: 4rem 1rem 3.5rem; }
+      .comparison-table-wrap table { min-width: 540px; }
     }
-    @media (max-width: 480px) {
-      .stat-grid { grid-template-columns: 1fr 1fr; }
+    @media (max-width: 640px) {
       .nav-links { display: none; }
+      .nav-hamburger { display: flex; }
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .hero-title { font-size: clamp(1.8rem, 8vw, 2.6rem); }
+      .hero-tagline { font-size: 0.95rem; }
+      .cta-group { gap: 0.65rem; }
+      .btn { padding: 0.65rem 1.25rem; font-size: 0.88rem; }
+      section { padding: 3rem 1rem; }
+      #hero { padding: 3rem 1rem 2.5rem; }
+      h2 { font-size: clamp(1.4rem, 5vw, 2rem); }
+      .bench-card { padding: 1.25rem; }
+      .accuracy-badge { font-size: 2rem; }
+      .phase-card { padding: 1.25rem; }
+      .get-started-links { flex-direction: column; gap: 0.6rem; }
+      .link-card { width: 100%; justify-content: center; }
+      .cite-card { padding: 1.25rem; }
+      .code-wrap pre { font-size: 0.76rem; }
+      .accuracy-footnote { font-size: 0.75rem; }
+    }
+    @media (max-width: 380px) {
+      .nav-brand span.brand-text { display: none; }
+      .stat-number { font-size: 1.8rem; }
     }
   </style>
 </head>
@@ -669,7 +758,18 @@
 
 <!-- ── Navigation ── -->
 <nav>
-  <span class="nav-brand">SapiensOntoCellMap</span>
+  <a href="#" class="nav-brand">
+    <svg class="nav-logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect width="64" height="64" rx="10" fill="white" fill-opacity="0.15"/>
+      <path d="M 42,15 A 11,11 0 0 0 21,15 A 11,11 0 0 0 21,26 A 11,11 0 0 0 43,26 A 11,11 0 0 0 43,37 A 11,11 0 0 0 22,37" fill="none" stroke="white" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="22" y1="37" x2="22" y2="45" stroke="white" stroke-width="5.5" stroke-linecap="round"/>
+      <line x1="22" y1="45" x2="14" y2="56" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+      <line x1="22" y1="45" x2="30" y2="56" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+      <circle cx="14" cy="57" r="2.5" fill="white"/>
+      <circle cx="30" cy="57" r="2.5" fill="white"/>
+    </svg>
+    <span class="brand-text">SapiensOntoCellMap</span>
+  </a>
   <ul class="nav-links">
     <li><a href="#what">What</a></li>
     <li><a href="#why">Why</a></li>
@@ -678,7 +778,18 @@
     <li><a href="#install">Get Started</a></li>
     <li><a href="#cite">Cite</a></li>
   </ul>
+  <button class="nav-hamburger" aria-label="Open navigation menu" aria-expanded="false" onclick="toggleMobileNav(this)">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
+<ul class="nav-mobile-menu" id="mobileMenu">
+  <li><a href="#what" onclick="closeMobileNav()">What</a></li>
+  <li><a href="#why" onclick="closeMobileNav()">Why</a></li>
+  <li><a href="#how" onclick="closeMobileNav()">How it Works</a></li>
+  <li><a href="#results" onclick="closeMobileNav()">Results</a></li>
+  <li><a href="#install" onclick="closeMobileNav()">Get Started</a></li>
+  <li><a href="#cite" onclick="closeMobileNav()">Cite</a></li>
+</ul>
 
 <!-- ── 1. Hero ── -->
 <section id="hero">
@@ -1059,6 +1170,26 @@ pip install -e .</code></pre>
 </footer>
 
 <script>
+  // ── Mobile nav ──
+  function toggleMobileNav(btn) {
+    var menu = document.getElementById('mobileMenu');
+    var isOpen = menu.classList.contains('open');
+    menu.classList.toggle('open', !isOpen);
+    btn.classList.toggle('open', !isOpen);
+    btn.setAttribute('aria-expanded', !isOpen);
+  }
+  function closeMobileNav() {
+    var menu = document.getElementById('mobileMenu');
+    var btn = document.querySelector('.nav-hamburger');
+    menu.classList.remove('open');
+    btn.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  // Close on outside click
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('nav') && !e.target.closest('#mobileMenu')) closeMobileNav();
+  });
+
   // ── Syntax highlighting ──
   document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('pre code').forEach(function (el) {
