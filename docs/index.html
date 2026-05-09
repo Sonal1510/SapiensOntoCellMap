@@ -858,7 +858,7 @@
         <a class="reproduce-btn" href="https://github.com/Sonal1510/SapiensOntoCellMap/tree/main/benchmarking" target="_blank" rel="noopener">Reproduce &#8599;</a>
       </div>
     </div>
-    <p class="accuracy-footnote">Accuracy = fraction of clusters where SapiensOntoCellMap Top_Cell_Type or Broad_Type shares at least one semantic token with the published ground-truth label.</p>
+    <p class="accuracy-footnote">Accuracy colour key: <span style="color:#2e7d32;font-weight:600;">&#9679; Exact</span> = Top_Cell_Type shares a word-level token with the ground-truth label; <span style="color:#f9a825;font-weight:600;">&#9679; Partial</span> = correct broad cell class or ground-truth type appears anywhere in the CL hierarchical lineage traversed for that cluster; <span style="color:#c62828;font-weight:600;">&#9679; Miss</span> = no match at any level. Reported accuracy = (Exact + Partial) / total clusters.</p>
   </div>
 </section>
 
@@ -872,11 +872,16 @@
       <div class="step-card">
         <div class="step-number">1</div>
         <h3>Install</h3>
-        <p>Clone the repository and install dependencies.</p>
+        <p>Clone the repository and install with <strong>uv</strong> (recommended) or pip.</p>
         <div class="code-wrap">
           <button class="copy-btn" onclick="copyCode(this)">Copy</button>
           <pre><code class="language-bash">git clone https://github.com/Sonal1510/SapiensOntoCellMap.git
 cd SapiensOntoCellMap
+
+# Recommended — fast, isolated, reproducible
+uv venv && uv pip install -e .
+
+# Alternative
 pip install -e .</code></pre>
         </div>
       </div>
@@ -948,8 +953,8 @@ pip install -e .</code></pre>
         <div class="zenodo-note">
           <strong>Deposit on Zenodo for a citable DOI:</strong> Visit <a href="https://zenodo.org" target="_blank" rel="noopener">zenodo.org</a> &rarr; connect your GitHub repo &rarr; create a release &rarr; a DOI is auto-assigned and minted permanently.
         </div>
-        <div class="zenodo-badge">
-          <img src="https://zenodo.org/badge/DOI/pending.svg" alt="DOI pending" loading="lazy" />
+        <div class="zenodo-badge" style="padding:0.5rem 0;color:#666;font-size:0.9rem;">
+          DOI coming soon &mdash; Zenodo deposit in progress.
         </div>
       </div>
 
