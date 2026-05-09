@@ -211,28 +211,54 @@ rbox(0.55, 5.16, 8.28, 0.82, C_DB, C_DB_EDGE,
 arr(2.3, 6.20, 2.3, 5.98)
 arr(6.55, 6.20, 6.55, 5.98)
 
-# ── Dynamic DB Update — between master_db and Interactive Visualizer ─────────────
-# master_db bottom = 5.16; we place this box from y=4.52 to y=5.04 (h=0.52),
-# then shift Interactive Visualizer down to y=3.56 to avoid overlap.
+# ── Dynamic DB Update — selling-point callout ─────────────────────────────────
+# master_db bottom = 5.16;  place this box y=3.94–5.04 (h=1.10)
+# Interactive Visualizer shifted down to y=2.85
 DYN_X = 0.55
-DYN_Y = 4.48
+DYN_Y = 3.76
 DYN_W = 8.28
-DYN_H = 0.56
+DYN_H = 1.28
 
-rbox(DYN_X, DYN_Y, DYN_W, DYN_H,
-     C_INPUT, C_INPUT_EDGE,
-     'Dynamic DB Update',
-     subtitle='add source CSV + config entry  →  re-run DatabaseCreate  →  updated master DB',
-     fontsize=9.5, text_color=C_INPUT_TEXT, sub_color='#bf360c',
-     bold=True, radius=0.20, zorder=4)
+# Outer frame — slightly more opaque fill to make it pop
+dyn_frame = FancyBboxPatch((DYN_X, DYN_Y), DYN_W, DYN_H,
+    boxstyle="round,pad=0.0,rounding_size=0.22",
+    facecolor='#fff8f0', edgecolor=C_INPUT_EDGE, linewidth=2.2, zorder=4)
+ax.add_patch(dyn_frame)
+
+# Accent bar on left edge
+ax.add_patch(FancyBboxPatch((DYN_X, DYN_Y), 0.18, DYN_H,
+    boxstyle="round,pad=0.0,rounding_size=0.10",
+    facecolor=C_INPUT_EDGE, edgecolor='none', linewidth=0, zorder=5))
+
+# Title
+ax.text(DYN_X + 0.36, DYN_Y + DYN_H - 0.22,
+        '★  Flexible Database Updates',
+        ha='left', va='center', fontsize=10, fontweight='bold',
+        color=C_INPUT_EDGE, fontfamily='DejaVu Sans', zorder=6)
+
+# Separator
+ax.plot([DYN_X + 0.28, DYN_X + DYN_W - 0.14],
+        [DYN_Y + DYN_H - 0.36, DYN_Y + DYN_H - 0.36],
+        color=C_INPUT_EDGE, linewidth=0.9, alpha=0.45, zorder=6)
+
+# Bullet points — 3 key selling points
+bullets = [
+    '+  Add any new source:  drop in a CSV + one config entry',
+    '♻  Re-run DatabaseCreate  →  updated master DB in minutes',
+    '■  Existing annotations unaffected; new cell types auto-integrated',
+]
+for bi, btxt in enumerate(bullets):
+    ax.text(DYN_X + 0.40, DYN_Y + DYN_H - 0.62 - bi * 0.26,
+            btxt, ha='left', va='center', fontsize=8.2,
+            color='#6d3a00', fontfamily='DejaVu Sans', zorder=6)
 
 # master_db bottom → Dynamic Update top
 arr(4.69, 5.16, 4.69, DYN_Y + DYN_H, color=C_INPUT_EDGE, lw=1.3, mutation_scale=11)
 # Dynamic Update bottom → Interactive Visualizer top
-arr(4.69, DYN_Y, 4.69, 3.56 + 0.84, color=C_ARROW_DB)
+arr(4.69, DYN_Y, 4.69, 2.68 + 0.84, color=C_ARROW_DB)
 
-# ── Interactive Visualizer  (shifted down to y=3.56 to make room) ──
-rbox(0.55, 3.56, 8.28, 0.84, C_VIZ, C_VIZ_EDGE,
+# ── Interactive Visualizer ──
+rbox(0.55, 2.68, 8.28, 0.84, C_VIZ, C_VIZ_EDGE,
      'Interactive Visualizer',
      subtitle='sapiens_visualizer.html  ·  4 tabs',
      fontsize=10, text_color=C_VIZ_TEXT, sub_color='#1565c0', bold=True, radius=0.22, zorder=4)
