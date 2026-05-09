@@ -2,17 +2,18 @@
 """
 SapiensOntoCellMap Benchmarking — Annotation Runner
 =====================================================
-Runs SapiensOntoCellMap on the benchmark datasets downloaded by
-download_datasets.py.
+Runs SapiensOntoCellMap on the benchmark datasets.
 
 Datasets
 --------
 1. PBMC3k              — scRNA-seq  | DEG: CellRanger kmeans/8_clusters CSV (no graphclust in v1.1.0)
-2. Atera Breast Cancer — Atera WTA  | DEG: computed via scanpy Wilcoxon from cell_feature_matrix.h5
+2. Atera Breast Cancer — Atera WTA  | DEG: pre-computed graphclust CSV from NAS analysis.tar.gz
+                                       GT:  cell_groups.csv from NAS (per-barcode, 20 cell types)
 
 Prerequisites
 -------------
-    python benchmarking/download_datasets.py   # download raw data first
+    python benchmarking/download_datasets.py --datasets pbmc3k   # PBMC3k only
+    # Atera reads directly from NAS — /Volumes/shainlab/Sonal/sapiensontocellmap_atera/
 
 Usage
 -----
@@ -73,100 +74,74 @@ def find_kmeans_deg(data_dir: Path, n_clusters: int = 8) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# DEG computation for Atera (scanpy Wilcoxon from cell_feature_matrix.h5)
+# Atera NAS helpers — extract pre-computed files from analysis.tar.gz
 # ---------------------------------------------------------------------------
 
-def compute_atera_degs(data_dir: Path, output_dir: Path, skip_existing: bool,
-                       dataset_name: str = "atera_breast_cancer") -> Path:
+_ATERA_NAS = Path("/Volumes/shainlab/Sonal/sapiensontocellmap_atera")
+
+_ATERA_DEG_TAR_PATH      = "analysis/diffexp/gene_expression_graphclust/differential_expression.csv"
+_ATERA_CLUSTERS_TAR_PATH = "analysis/clustering/gene_expression_graphclust/clusters.csv"
+_ATERA_CELL_GROUPS_URL   = (
+    "https://cf.10xgenomics.com/samples/atera/dev/"
+    "WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv"
+)
+_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+
+def extract_atera_nas_files(out_dir: Path, skip_existing: bool) -> tuple[Path, Path, Path]:
     """
-    Compute Wilcoxon rank-sum DEGs per cluster from Atera cell_feature_matrix.h5.
+    Prepare the three files needed for Atera benchmarking:
+      1. graphclust differential_expression.csv — extracted from NAS analysis.tar.gz
+      2. graphclust clusters.csv               — extracted from NAS analysis.tar.gz
+      3. cell_groups.csv (GT labels)           — downloaded from 10x CF if not cached
 
-    Clusters are read from cell_groups.csv (per-barcode labels from 10x CF).
-    Saves DEG CSV (scanpy format) and barcode→cluster CSV for GT comparison.
-
-    Returns path to the saved DEG CSV.
+    All outputs are written to out_dir (local results directory).
+    Returns (deg_csv, clusters_csv, cell_groups_csv) as local Paths.
     """
-    deg_path = output_dir / f"{dataset_name}_degs.csv"
-    if deg_path.exists() and skip_existing:
-        logger.info(f"Using cached DEG file: {deg_path}")
-        return deg_path
+    import tarfile
+    import urllib.request
 
-    try:
-        import scanpy as sc
-        import pandas as pd
-    except ImportError as e:
-        logger.error(f"Missing dependency: {e}. Install: pip install scanpy")
+    nas_tar       = _ATERA_NAS / "analysis.tar.gz"
+    deg_dest      = out_dir / "atera_differential_expression.csv"
+    clusters_dest = out_dir / "atera_clusters.csv"
+    cg_dest       = out_dir / "atera_cell_groups.csv"
+
+    if not nas_tar.exists():
+        logger.error(f"NAS file not found: {nas_tar}. Mount /Volumes/shainlab first.")
         sys.exit(1)
 
-    h5_path        = data_dir / "cell_feature_matrix.h5"
-    cell_groups_path = data_dir / "cell_groups.csv"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    for p in [h5_path, cell_groups_path]:
-        if not p.exists():
-            logger.error(f"{p.name} not found at {p}.")
-            sys.exit(1)
+    if deg_dest.exists() and skip_existing:
+        logger.info(f"Using cached DEG CSV: {deg_dest}")
+    else:
+        logger.info(f"Extracting DEG CSV from {nas_tar.name} ...")
+        with tarfile.open(nas_tar, "r:gz") as tf:
+            member = tf.getmember(_ATERA_DEG_TAR_PATH)
+            with tf.extractfile(member) as src, open(deg_dest, "wb") as dst:
+                dst.write(src.read())
+        logger.info(f"  Saved: {deg_dest}")
 
-    logger.info("Loading Atera cell_feature_matrix.h5 ...")
-    adata = sc.read_10x_h5(str(h5_path))
-    adata.var_names_make_unique()
-    logger.info(f"  {adata.n_obs:,} cells × {adata.n_vars:,} genes")
+    if clusters_dest.exists() and skip_existing:
+        logger.info(f"Using cached clusters CSV: {clusters_dest}")
+    else:
+        logger.info(f"Extracting clusters CSV from {nas_tar.name} ...")
+        with tarfile.open(nas_tar, "r:gz") as tf:
+            member = tf.getmember(_ATERA_CLUSTERS_TAR_PATH)
+            with tf.extractfile(member) as src, open(clusters_dest, "wb") as dst:
+                dst.write(src.read())
+        logger.info(f"  Saved: {clusters_dest}")
 
-    logger.info("Loading cluster assignments from cell_groups.csv ...")
-    cg = pd.read_csv(cell_groups_path)
-    # Expected columns: Barcode, Group (cell type label)
-    barcode_col = next((c for c in cg.columns if "barcode" in c.lower()), cg.columns[0])
-    group_col   = next((c for c in cg.columns if "group" in c.lower() or "cell" in c.lower()
-                        and c != barcode_col), cg.columns[1])
-    cg = cg.rename(columns={barcode_col: "barcode", group_col: "cluster"})
-    cg = cg.set_index("barcode")["cluster"]
+    if cg_dest.exists() and skip_existing:
+        logger.info(f"Using cached cell_groups CSV: {cg_dest}")
+    else:
+        logger.info(f"Downloading cell_groups.csv from 10x CF ...")
+        req = urllib.request.Request(_ATERA_CELL_GROUPS_URL, headers=_HEADERS)
+        with urllib.request.urlopen(req) as resp, open(cg_dest, "wb") as dst:
+            dst.write(resp.read())
+        logger.info(f"  Saved: {cg_dest}")
 
-    adata.obs["cluster"] = cg.reindex(adata.obs_names).values
-    n_missing = adata.obs["cluster"].isna().sum()
-    if n_missing > 0:
-        logger.warning(f"  {n_missing:,} cells not in cell_groups.csv — dropping")
-        adata = adata[adata.obs["cluster"].notna()].copy()
-    adata.obs["cluster"] = adata.obs["cluster"].astype("category")
-    logger.info(f"  {adata.n_obs:,} cells across {adata.obs['cluster'].nunique()} clusters")
-
-    logger.info("Normalising counts ...")
-    sc.pp.normalize_total(adata, target_sum=1e4)
-    sc.pp.log1p(adata)
-
-    logger.info(f"Computing Wilcoxon DEGs ({adata.obs['cluster'].nunique()} clusters) ...")
-    sc.tl.rank_genes_groups(adata, groupby="cluster", method="wilcoxon", use_raw=False)
-
-    logger.info("Exporting DEG CSV ...")
-    results = adata.uns["rank_genes_groups"]
-    groups  = results["names"].dtype.names
-    rows = []
-    for grp in groups:
-        for gene, score, pval, lfc in zip(
-            results["names"][grp],
-            results["scores"][grp],
-            results["pvals_adj"][grp],
-            results["logfoldchanges"][grp],
-        ):
-            rows.append({
-                "names":          gene,
-                "scores":         score,
-                "pvals_adj":      pval,
-                "logfoldchanges": lfc,
-                "group":          grp,
-            })
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    deg_df = pd.DataFrame(rows)
-    deg_df.to_csv(deg_path, index=False)
-    logger.info(f"DEGs saved: {deg_path}  ({len(deg_df):,} rows)")
-
-    cell_assignments_path = output_dir / f"{dataset_name}_cell_clusters.csv"
-    pd.DataFrame({
-        "barcode": adata.obs_names,
-        "cluster": adata.obs["cluster"].astype(str),
-    }).to_csv(cell_assignments_path, index=False)
-    logger.info(f"Cell cluster assignments saved: {cell_assignments_path}")
-
-    return deg_path
+    return deg_dest, clusters_dest, cg_dest
 
 
 # ---------------------------------------------------------------------------
@@ -290,24 +265,16 @@ def run_pbmc3k(skip_existing: bool) -> None:
 
 
 def run_atera_breast_cancer(skip_existing: bool) -> None:
-    data_dir = _DATA_DIR / "atera_breast_cancer"
-    if not data_dir.exists():
-        logger.error(
-            "Atera breast cancer data not found. "
-            "Extract WTA_Preview_FFPE_Breast_Cancer_outs.zip to benchmarking/data/atera_breast_cancer/"
-        )
-        sys.exit(1)
-
     out_dir = _RESULTS_DIR / "atera_breast_cancer"
-    deg_csv = compute_atera_degs(data_dir, out_dir, skip_existing, dataset_name="atera_breast_cancer")
+    deg_csv, clusters_csv, cell_groups_csv = extract_atera_nas_files(out_dir, skip_existing)
 
     run_annotation(
         sample_name="atera_breast_cancer",
         input_path=deg_csv,
-        deg_type="scrna",
+        deg_type="spatial",
         output_dir=_RESULTS_DIR,
         tissue="breast",
-        deg_format="scanpy",
+        deg_format="generic",
         skip_existing=skip_existing,
     )
 
