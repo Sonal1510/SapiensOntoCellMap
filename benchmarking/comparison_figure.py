@@ -74,39 +74,54 @@ P = dict(
 
 # Lineage colours — print-safe, colorbrewer-derived
 LINEAGE_COLORS = {
-    "melanocyte":    "#1b7837",
-    "pigment":       "#1b7837",
-    "macrophage":    "#542788",
-    "mononuclear":   "#542788",
-    "monocyte":      "#7b3294",
-    "dendritic":     "#9970ab",
-    "plasma":        "#2166ac",
-    "b cell":        "#2166ac",
+    # Tumour / epithelial
+    "tumor":         "#d73027",
+    "invasive":      "#d73027",
+    "dcis":          "#f46d43",
+    "luminal":       "#fdae61",
+    "myoepithelial": "#fee090",
+    "apocrine":      "#ffffbf",
+    "keratinocyte":  "#d6604d",
+    "epithelial":    "#f46d43",
+    # Stroma
     "fibroblast":    "#4393c3",
+    "caf":           "#2166ac",
     "stromal":       "#4393c3",
     "pericyte":      "#74add1",
     "smooth muscle": "#abd9e9",
-    "keratinocyte":  "#d6604d",
-    "epithelial":    "#f46d43",
     "endothelial":   "#fdae61",
-    "red blood":     "#a50026",
+    # Immune
+    "macrophage":    "#542788",
+    "mononuclear":   "#542788",
+    "monocyte":      "#7b3294",
+    "myeloid":       "#9970ab",
+    "dendritic":     "#c2a5cf",
+    "mast":          "#1b7837",
+    "plasma":        "#2166ac",
+    "b cell":        "#4575b4",
     "t cell":        "#878787",
+    "lymphocyte":    "#636363",
     "nk":            "#636363",
-    "granulocyte":   "#4d4d4d",
     "neutrophil":    "#4d4d4d",
+    "granulocyte":   "#4d4d4d",
+    # Other
+    "melanocyte":    "#1b7837",
+    "red blood":     "#a50026",
 }
 
-# Bonafide marker genes per lineage (literature-curated, skin + blood)
+# Bonafide marker genes per lineage (literature-curated, breast cancer + blood)
 BONAFIDE_MARKERS = {
-    "Melanocyte":   ["MLANA", "TYRP1", "DCT"],
-    "Macrophage":   ["CD68", "CD163", "MRC1"],
-    "B / Plasma":   ["CD19", "JCHAIN", "IGHG1"],
-    "Fibroblast":   ["COL1A1", "DCN", "PDGFRA"],
-    "Keratinocyte": ["KRT14", "KRT5", "IVL"],
+    "Tumor":        ["ERBB2", "ESR1", "MKI67"],
+    "Myoepithelial":["ACTA2", "TP63", "KRT17"],
+    "Luminal":      ["KRT8", "KRT18", "FOXA1"],
+    "CAF":          ["COL1A1", "FAP", "PDGFRA"],
     "Endothelial":  ["PECAM1", "VWF", "CDH5"],
-    "T / NK":       ["CD3E", "CD8A", "NKG7"],
+    "Pericyte":     ["RGS5", "PDGFRB", "MCAM"],
+    "T cell":       ["CD3E", "CD8A", "FOXP3"],
+    "B / Plasma":   ["CD19", "JCHAIN", "IGHG1"],
+    "Macrophage":   ["CD68", "CD163", "MRC1"],
     "Dendritic":    ["CD1C", "CLEC9A", "ITGAX"],
-    "Monocyte":     ["S100A8", "LYZ", "FCGR3A"],
+    "Mast":         ["TPSAB1", "CPA3", "KIT"],
 }
 ALL_MARKER_GENES = [g for genes in BONAFIDE_MARKERS.values() for g in genes]
 
@@ -167,55 +182,29 @@ GT_PBMC3K = {
     "Cluster 8":  "non-classical monocyte",  # FCGR3A=6.4, LST1=15.6, MS4A7, AIF1, CDKN1C
 }
 
-GT_XENIUM_SKIN = {
-    # Xenium human skin normal — graphclust cluster → published cell type
-    # Labels from 10x Genomics analysis summary (Xenium Multi-Tissue Panel)
-    "1":  "Keratinocyte",
-    "2":  "Fibroblast",
-    "3":  "Endothelial cell",
-    "4":  "T cell",
-    "5":  "Macrophage",
-    "6":  "Melanocyte",
-    "7":  "Keratinocyte",
-    "8":  "Smooth muscle cell",
-    "9":  "B cell",
-    "10": "Dendritic cell",
-}
-
-GT_VISIUM_MELANOMA = {
-    # Visium CytAssist melanoma — graphclust cluster → published cell type
-    # Labels from 10x Genomics web summary (CytAssist_FFPE_Human_Skin_Melanoma)
-    "1":  "Melanoma cell",
-    "2":  "Fibroblast",
-    "3":  "Endothelial cell",
-    "4":  "Melanoma cell",
-    "5":  "Macrophage",
-    "6":  "Keratinocyte",
-    "7":  "T cell",
-    "8":  "Fibroblast",
-    "9":  "Melanoma cell",
-    "10": "B cell",
-}
-
+# Atera GT: maps cell_groups.csv "group" label → canonical cell type name for accuracy matching.
+# "Unassigned" excluded from accuracy calculation (mapped to None).
 GT_ATERA_BREAST_CANCER = {
-    # Atera WTA Preview — FFPE Human Breast Cancer (10x Genomics dev preview)
-    # Cluster → cell type: TO BE FILLED after inspecting cluster annotations
-    # in the downloaded WTA_Preview_FFPE_Breast_Cancer_outs/
-}
-
-# NOTE: GT_XENIUM_SKIN is barcode-level, not cluster-level.
-# Other datasets use cluster-id → label maps; this dataset uses per-barcode labels
-# from MOESM15 (Ext Data Fig 7 of the Shain lab paper). Comparison logic for this
-# dataset must join SOM leiden cluster assignments to the ground_truth.csv on barcode,
-# then aggregate per-cluster majority label before building the bubble matrix.
-# "Others" is excluded from accuracy calculation (mapped to None).
-GT_XENIUM_SKIN = {
-    "Adnexal":      "adnexal cell",
-    "Fibroblasts":  "fibroblast",
-    "Keratinocytes": "keratinocyte",
-    "Immune":       "immune cell",
-    "Melanocytes":  "melanocyte",
-    "Others":       None,  # exclude from accuracy calculation
+    "11q13 Invasive Tumor Cells":           "invasive tumor cell",
+    "11q13 Invasive Tumor Cells (Mitotic)": "invasive tumor cell",
+    "11q13 Invasive Tumor Cells (G1/S)":    "invasive tumor cell",
+    "CAFs, DCIS Associated":                "cancer associated fibroblast",
+    "CAFs, Invasive Associated":            "cancer associated fibroblast",
+    "CXCL14+ Fibroblasts":                  "fibroblast",
+    "Luminal-like Amorphous DCIS Cells":    "luminal epithelial cell of mammary gland",
+    "Basal-like Structured DCIS Cells":     "basal cell",
+    "Myoepithelial Cells":                  "myoepithelial cell",
+    "Apocrine Cells":                       "apocrine cell",
+    "Endothelial Cells":                    "endothelial cell",
+    "Pericytes":                            "pericyte",
+    "T Lymphocytes":                        "T cell",
+    "B Cells":                              "B cell",
+    "Plasma Cells":                         "plasmablast",
+    "Macrophages":                          "macrophage",
+    "Myeloid Cells":                        "myeloid cell",
+    "Dendritic Cells":                      "dendritic cell",
+    "Mast Cells":                           "mast cell",
+    "Unassigned":                           None,
 }
 
 DATASET_CONFIGS = {
@@ -227,31 +216,18 @@ DATASET_CONFIGS = {
         "h5_path":        _DATA_DIR / "pbmc3k" / "filtered_gene_bc_matrices" / "hg19" / "matrix.mtx",
         "h5_format":      "mtx",
     },
-    "visium_melanoma": {
-        "display_name":   "Human Skin Melanoma (Visium CytAssist)",
-        "platform":       "10x Visium CytAssist / SpaceRanger 2.0.0",
-        "ground_truth":   GT_VISIUM_MELANOMA,
-        "som_sample":     "visium_melanoma",
-        "h5_path":        _DATA_DIR / "visium_melanoma" / "filtered_feature_bc_matrix.h5",
-        "h5_format":      "h5",
-    },
     "atera_breast_cancer": {
         "display_name":   "Atera WTA Preview — FFPE Human Breast Cancer",
         "platform":       "10x Atera (whole-transcriptome in situ, dev preview)",
         "ground_truth":   GT_ATERA_BREAST_CANCER,
+        "gt_type":        "barcode",
+        "gt_csv":         _RESULTS_DIR / "atera_breast_cancer" / "atera_cell_groups.csv",
+        "gt_barcode_col": "cell_id",
+        "gt_label_col":   "group",
+        "clusters_csv":   _RESULTS_DIR / "atera_breast_cancer" / "atera_clusters.csv",
         "som_sample":     "atera_breast_cancer",
-        "h5_path":        _DATA_DIR / "atera_breast_cancer" / "cell_feature_matrix.h5",
+        "h5_path":        Path("/Volumes/shainlab/Sonal/sapiensontocellmap_atera/cell_feature_matrix.h5"),
         "h5_format":      "h5",
-    },
-    "xenium_skin": {
-        "display_name":   "Shain Lab Human Skin Xenium (GSM8734926, Section 1)",
-        "platform":       "10x Xenium / XOA 3.0.2",
-        "ground_truth":   GT_XENIUM_SKIN,
-        "gt_type":        "barcode",   # barcode-level GT — join on ground_truth.csv, not cluster-id map
-        "gt_csv":         _BENCH_DIR / "data" / "xenium_skin" / "shain_xenium" / "ground_truth.csv",
-        "som_sample":     "xenium_skin",
-        "h5_path":        _DATA_DIR / "xenium_skin" / "matrix.mtx.gz",
-        "h5_format":      "mtx_gz",
     },
 }
 
@@ -609,37 +585,38 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
 
 # ── Barcode-level GT join ──────────────────────────────────────────────────────
 
-def build_cluster_gt_from_barcodes(gt_csv: Path, cell_clusters_csv: Path,
-                                   gt_label_map: dict) -> dict:
+def build_cluster_gt_from_barcodes(gt_csv: Path, clusters_csv: Path,
+                                   gt_label_map: dict,
+                                   gt_barcode_col: str = "barcode",
+                                   gt_label_col: str = "cell_type",
+                                   cluster_barcode_col: str = "Barcode",
+                                   cluster_id_col: str = "Cluster") -> dict:
     """
-    Join barcode-level ground truth with Leiden cluster assignments.
+    Join barcode-level ground truth with cluster assignments.
 
-    For each Leiden cluster, assign the majority GT label (excluding "Others" / None).
-    Returns a dict: leiden_cluster_str → canonical_gt_label_str (CL-style label from gt_label_map).
-    Only clusters where a clear majority (>50% of labelled cells) can be assigned are included.
+    For each cluster, assign the majority GT label (mapped through gt_label_map).
+    Labels that map to None in gt_label_map are excluded from majority voting.
+    Returns a dict: "Cluster N" → canonical_gt_label_str.
     """
-    gt_df = pd.read_csv(gt_csv)        # columns: barcode, cell_type
-    cc_df = pd.read_csv(cell_clusters_csv)  # columns: barcode, cluster
+    gt_df = pd.read_csv(gt_csv)
+    cc_df = pd.read_csv(clusters_csv)
 
-    # Normalise barcodes — Xenium barcodes may or may not have a suffix
-    def strip_suffix(bc):
-        # Remove trailing '-1' or similar digit suffixes added by CellRanger/Xenium
-        return bc.rsplit("-", 1)[0] if bc.rsplit("-", 1)[-1].isdigit() else bc
+    # Rename to common internal column names
+    gt_df = gt_df.rename(columns={gt_barcode_col: "barcode", gt_label_col: "raw_label"})
+    cc_df = cc_df.rename(columns={cluster_barcode_col: "barcode", cluster_id_col: "cluster"})
 
-    gt_df["barcode_norm"]  = gt_df["barcode"].apply(strip_suffix)
-    cc_df["barcode_norm"]  = cc_df["barcode"].apply(strip_suffix)
-
-    merged = cc_df.merge(gt_df[["barcode_norm", "cell_type"]], on="barcode_norm", how="left")
-    merged["cell_type"] = merged["cell_type"].fillna("Others")
+    merged = cc_df.merge(gt_df[["barcode", "raw_label"]], on="barcode", how="left")
+    merged["raw_label"] = merged["raw_label"].fillna("Unassigned")
 
     cluster_to_gt = {}
     for cluster, grp in merged.groupby("cluster"):
-        labelled = grp[grp["cell_type"] != "Others"]
+        # Exclude labels that map to None
+        labelled = grp[grp["raw_label"].map(lambda x: gt_label_map.get(x) is not None)]
         if labelled.empty:
             continue
-        majority_label = labelled["cell_type"].mode()[0]
-        majority_frac  = (labelled["cell_type"] == majority_label).sum() / len(grp)
-        canonical      = gt_label_map.get(majority_label)
+        majority_raw   = labelled["raw_label"].mode()[0]
+        majority_frac  = (labelled["raw_label"] == majority_raw).sum() / len(grp)
+        canonical      = gt_label_map.get(majority_raw)
         if canonical is not None and majority_frac > 0.1:
             cluster_to_gt[f"Cluster {cluster}"] = canonical
     logger.info(f"Barcode GT join: {len(cluster_to_gt)} clusters assigned a majority GT label")
@@ -696,18 +673,21 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
 
     # For barcode-level GT datasets, build cluster→GT map via majority-vote join
     if cfg.get("gt_type") == "barcode":
-        gt_csv = cfg.get("gt_csv")
-        cell_clusters_csv = (
-            _RESULTS_DIR / cfg["som_sample"] / f"{cfg['som_sample']}_cell_clusters.csv"
-        )
-        if gt_csv and Path(gt_csv).exists() and cell_clusters_csv.exists():
+        gt_csv       = cfg.get("gt_csv")
+        clusters_csv = cfg.get("clusters_csv",
+                          _RESULTS_DIR / cfg["som_sample"] / f"{cfg['som_sample']}_cell_clusters.csv")
+        gt_barcode_col = cfg.get("gt_barcode_col", "barcode")
+        gt_label_col   = cfg.get("gt_label_col", "cell_type")
+        if gt_csv and Path(gt_csv).exists() and Path(clusters_csv).exists():
             ground_truth = build_cluster_gt_from_barcodes(
-                Path(gt_csv), cell_clusters_csv, ground_truth
+                Path(gt_csv), Path(clusters_csv), ground_truth,
+                gt_barcode_col=gt_barcode_col,
+                gt_label_col=gt_label_col,
             )
         else:
             logger.warning(
                 f"Barcode GT join skipped — missing file(s): "
-                f"gt_csv={gt_csv}, cell_clusters={cell_clusters_csv}"
+                f"gt_csv={gt_csv}, clusters_csv={clusters_csv}"
             )
 
     logger.info("Computing per-cluster accuracy ...")
@@ -786,7 +766,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=list(DATASET_CONFIGS.keys()),
         default=list(DATASET_CONFIGS.keys()),
-        help="Which datasets to plot (default: all 3)",
+        help="Which datasets to plot (default: all)",
     )
     parser.add_argument(
         "--dpi", type=int, default=300,
