@@ -747,16 +747,16 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
                                 norm=mcolors.Normalize(vmin=0, vmax=vmax))
     sm.set_array([])
     cbar = plt.colorbar(sm, cax=cax)
-    cbar.set_label("Mean expression\n(log-norm)", fontsize=5.5,
+    cbar.set_label("Mean expression\n(log-norm)", fontsize=7,
                    color=P["fg"], labelpad=3)
-    cbar.ax.tick_params(labelsize=5, colors=P["fg"], length=2)
+    cbar.ax.tick_params(labelsize=6, colors=P["fg"], length=2)
     cbar.outline.set_linewidth(0.4)
 
     # Size legend
     for frac_val, lbl in [(0.25, "25%"), (0.50, "50%"), (0.75, "75%")]:
         ax.scatter([], [], s=dot_max * frac_val, color="#999999",
                    edgecolors="#555555", linewidths=0.25, label=lbl)
-    ax.legend(title="% expressing", title_fontsize=5.5, fontsize=5.5,
+    ax.legend(title="% expressing", title_fontsize=7, fontsize=7,
               loc="lower right", bbox_to_anchor=(1.14, 0.0),
               frameon=True, framealpha=0.95, edgecolor=P["spine"],
               facecolor=P["bg_panel"])
@@ -940,7 +940,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
         ax_a, summary_df, ground_truth, accuracy=accuracy
     )
     # Panel letter
-    ax_a.text(-0.12, 1.05, "a", transform=ax_a.transAxes,
+    ax_a.text(-0.05, 1.06, "a", transform=ax_a.transAxes,
               fontsize=12, fontweight="bold", color=P["fg"], va="top")
 
     # Reference table below the matrix
@@ -970,7 +970,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
         dot_bottom = max(0.02, table_bottom_frac - 0.02 - matrix_frac * 0.9)
         ax_b = fig.add_axes([fig_left, dot_bottom, fig_right - fig_left, matrix_frac * 0.9])
         draw_dot_plot(ax_b, summary_df, X, barcodes, genes_in_matrix, ground_truth)
-        ax_b.text(-0.12, 1.04, "b", transform=ax_b.transAxes,
+        ax_b.text(-0.05, 1.06, "b", transform=ax_b.transAxes,
                   fontsize=12, fontweight="bold", color=P["fg"], va="top")
 
     # -- Title block ----------------------------------------------------------

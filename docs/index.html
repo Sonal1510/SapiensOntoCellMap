@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SapiensOntoCellMap — Ontology-Aware Cell Type Annotation</title>
+  <!-- DNS prefetch + preconnect for CDN resources -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+  <!-- highlight.js loaded async — does not block first paint -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="print" onload="this.media='all'" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+  <meta name="description" content="SapiensOntoCellMap — Ontology-aware hierarchical cell type annotation for single-cell and spatial transcriptomics. 14 databases, 442K associations, CL DAG traversal." />
+  <meta property="og:title" content="SapiensOntoCellMap" />
+  <meta property="og:description" content="Ontology-aware hierarchical cell type annotation for scRNA-seq and spatial transcriptomics." />
+  <meta property="og:image" content="https://sonal1510.github.io/SapiensOntoCellMap/architecture_diagram.png" />
+
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary:   #1a237e;
+      --primary-light: #283593;
+      --accent:    #7c4dff;
+      --accent-light: #b388ff;
+      --success:   #2e7d32;
+      --success-light: #e8f5e9;
+      --bg:        #f8f9fc;
+      --surface:   #ffffff;
+      --border:    #e0e0e0;
+      --text:      #212121;
+      --text-muted:#616161;
+      --code-bg:   #0d1117;
+      --highlight: #e8eaf6;
+    }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; height: auto; display: block; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(26, 35, 126, 0.97);
+      backdrop-filter: blur(8px);
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .nav-brand {
+      font-weight: 700;
+      font-size: 1rem;
+      color: #fff;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+    .nav-links {
+      display: flex;
+      gap: 0.25rem;
+      list-style: none;
+      flex-wrap: wrap;
+    }
+    .nav-links a {
+      color: rgba(255,255,255,0.85);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-links a:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    /* ── Hero ── */
+    #hero {
+      background: linear-gradient(135deg, #1a237e 0%, #311b92 40%, #4527a0 70%, #5c35c9 100%);
+      color: #fff;
+      padding: 6rem 2rem 5rem;
+      text-align: center;
+    }
+    .hero-title {
+      font-size: clamp(2.2rem, 5vw, 3.8rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+      line-height: 1.1;
+    }
+    .hero-tagline {
+      font-size: clamp(1rem, 2.5vw, 1.3rem);
+      font-weight: 300;
+      color: rgba(255,255,255,0.88);
+      max-width: 680px;
+      margin: 0 auto 2rem;
+    }
+    .badges {
+      display: flex;
+      gap: 0.6rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2.5rem;
+    }
+    .badge {
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.35);
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.3rem 0.8rem;
+      border-radius: 100px;
+      letter-spacing: 0.02em;
+    }
+    .cta-group {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 1.75rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: #fff;
+      color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: #e8eaf6;
+      text-decoration: none;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .btn-outline {
+      background: transparent;
+      color: #fff;
+      border: 2px solid rgba(255,255,255,0.65);
+    }
+    .btn-outline:hover {
+      background: rgba(255,255,255,0.12);
+      border-color: #fff;
+      text-decoration: none;
+      transform: translateY(-1px);
+    }
+    .btn-disabled {
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.45);
+      border: 2px solid rgba(255,255,255,0.2);
+      cursor: not-allowed;
+      position: relative;
+    }
+    .btn-disabled:hover { text-decoration: none; }
+    .btn-disabled[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      font-size: 0.75rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .btn-disabled:hover[data-tooltip]::after { opacity: 1; }
+
+    /* ── Section shared ── */
+    section { padding: 5rem 2rem; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .section-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.6rem;
+    }
+    h2 {
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+      color: var(--primary);
+    }
+    h3 { font-size: 1.15rem; font-weight: 600; color: var(--primary); margin-bottom: 0.5rem; }
+    p { margin-bottom: 1rem; color: var(--text-muted); }
+    p:last-child { margin-bottom: 0; }
+
+    /* ── What section ── */
+    #what { background: var(--surface); }
+    .what-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+    .stat-card {
+      background: var(--highlight);
+      border: 1px solid #c5cae9;
+      border-radius: 12px;
+      padding: 1.5rem 1.25rem;
+      text-align: center;
+    }
+    .stat-number {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: var(--primary);
+      letter-spacing: -0.04em;
+      line-height: 1;
+      margin-bottom: 0.35rem;
+    }
+    .stat-label {
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .platform-strip {
+      margin-top: 3rem;
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .platform-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-right: 0.25rem;
+    }
+    .chip {
+      background: var(--highlight);
+      border: 1px solid #c5cae9;
+      color: var(--primary);
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.3rem 0.85rem;
+      border-radius: 100px;
+    }
+
+    /* ── Why section ── */
+    #why { background: var(--bg); }
+    .comparison-table-wrap {
+      overflow-x: auto;
+      margin-top: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      font-size: 0.9rem;
+    }
+    th {
+      background: var(--primary);
+      color: #fff;
+      padding: 0.85rem 1.1rem;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    th:first-child { border-radius: 12px 0 0 0; }
+    th:last-child { border-radius: 0 12px 0 0; }
+    td {
+      padding: 0.8rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr.highlight-row td {
+      background: #e3f2fd;
+      font-weight: 600;
+      color: #0d47a1;
+    }
+    tr:not(.highlight-row):hover td { background: #fafafa; }
+    .callout {
+      background: linear-gradient(135deg, #e8eaf6 0%, #f3e5f5 100%);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 1.2rem 1.5rem;
+      margin-top: 2rem;
+      font-size: 0.95rem;
+      color: var(--primary);
+    }
+    .callout strong { font-weight: 700; }
+
+    /* ── How section ── */
+    #how { background: var(--surface); }
+    .phase-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+    .phase-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+    }
+    .phase-tag {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.65rem;
+      border-radius: 100px;
+      margin-bottom: 0.75rem;
+    }
+    .phase-tag.phase2 { background: var(--success); }
+    .arch-img-wrap {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .arch-img-wrap img { margin: 0 auto; border-radius: 8px; }
+    .arch-caption {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 0.75rem;
+      font-style: italic;
+    }
+
+    /* Accordion */
+    .accordion { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .accordion-item { border-top: 1px solid var(--border); }
+    .accordion-item:first-child { border-top: none; }
+    .accordion-btn {
+      width: 100%;
+      background: var(--surface);
+      border: none;
+      padding: 1rem 1.25rem;
+      text-align: left;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--primary);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.15s;
+    }
+    .accordion-btn:hover { background: var(--highlight); }
+    .accordion-btn .chevron { font-size: 0.7rem; transition: transform 0.2s; }
+    .accordion-btn.open .chevron { transform: rotate(180deg); }
+    .accordion-body {
+      display: none;
+      padding: 1rem 1.25rem 1.25rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      background: #fafbff;
+    }
+    .accordion-body.open { display: block; }
+    .accordion-body code {
+      background: var(--highlight);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: var(--primary);
+    }
+
+    /* ── Results section ── */
+    #results { background: var(--bg); }
+    .bench-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      margin-bottom: 2rem;
+    }
+    .bench-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .accuracy-badge {
+      display: inline-block;
+      background: var(--success-light);
+      border: 2px solid var(--success);
+      color: var(--success);
+      font-size: 2.5rem;
+      font-weight: 800;
+      padding: 0.5rem 1.25rem;
+      border-radius: 10px;
+      letter-spacing: -0.04em;
+      margin: 0.75rem 0 1rem;
+    }
+    .bench-meta {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 1.25rem;
+    }
+    .bench-figure {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      text-align: center;
+    }
+    .bench-figure img { border-radius: 6px; margin: 0 auto; }
+    .reproduce-btn {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.5rem 1.1rem;
+      background: var(--highlight);
+      color: var(--primary);
+      border: 1px solid #c5cae9;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .reproduce-btn:hover {
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+    }
+    .accuracy-footnote {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      border-left: 3px solid var(--border);
+      padding-left: 1rem;
+      margin-top: 1rem;
+      font-style: italic;
+    }
+
+    /* ── Get Started section ── */
+    #install { background: var(--surface); }
+    .steps-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1.5rem;
+    }
+    .step-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+    }
+    .step-number {
+      width: 36px;
+      height: 36px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+    }
+    .code-wrap {
+      position: relative;
+      margin-top: 0.75rem;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .code-wrap pre {
+      margin: 0;
+      padding: 1rem 1.1rem 1rem;
+      font-size: 0.82rem;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: rgba(255,255,255,0.75);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.22); color: #fff; }
+    .copy-btn.copied { background: var(--success); border-color: var(--success); color: #fff; }
+    .get-started-links {
+      margin-top: 2.5rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .link-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1.25rem;
+      background: var(--highlight);
+      border: 1px solid #c5cae9;
+      color: var(--primary);
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .link-card:hover {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      text-decoration: none;
+    }
+
+    /* ── Cite section ── */
+    #cite { background: var(--bg); }
+    .cite-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+    .cite-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+    }
+    .cite-card h3 { margin-bottom: 1rem; }
+    .zenodo-note {
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 8px;
+      padding: 1rem;
+      font-size: 0.85rem;
+      color: #5d4037;
+      margin-bottom: 1rem;
+    }
+    .zenodo-badge img { height: 20px; }
+    .db-table-wrap {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+    .db-table { font-size: 0.83rem; }
+    .db-table th { font-size: 0.8rem; padding: 0.6rem 0.85rem; }
+    .db-table td { padding: 0.6rem 0.85rem; }
+    .db-table a { color: var(--accent); font-size: 0.8rem; }
+    .stat-methods-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      background: var(--highlight);
+      color: var(--primary);
+      border: 1px solid #c5cae9;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .stat-methods-link:hover {
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+    }
+    .full-width-cite {
+      grid-column: 1 / -1;
+    }
+
+    /* ── Footer ── */
+    footer {
+      background: var(--primary);
+      color: rgba(255,255,255,0.75);
+      text-align: center;
+      padding: 2.5rem 2rem;
+      font-size: 0.85rem;
+    }
+    footer a { color: rgba(255,255,255,0.85); text-decoration: underline; }
+    footer .footer-pre {
+      margin-top: 0.5rem;
+      font-style: italic;
+      color: rgba(255,255,255,0.5);
+      font-size: 0.78rem;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 800px) {
+      .what-grid, .phase-grid, .bench-grid, .cite-grid { grid-template-columns: 1fr; }
+      .steps-grid { grid-template-columns: 1fr; }
+      nav { padding: 0 1rem; }
+      .nav-brand { font-size: 0.85rem; }
+      .nav-links a { font-size: 0.75rem; padding: 0.3rem 0.5rem; }
+      section { padding: 3.5rem 1rem; }
+      #hero { padding: 4rem 1rem 3.5rem; }
+    }
+    @media (max-width: 480px) {
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navigation ── -->
+<nav>
+  <span class="nav-brand">SapiensOntoCellMap</span>
+  <ul class="nav-links">
+    <li><a href="#what">What</a></li>
+    <li><a href="#why">Why</a></li>
+    <li><a href="#how">How it Works</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#install">Get Started</a></li>
+    <li><a href="#cite">Cite</a></li>
+  </ul>
+</nav>
+
+<!-- ── 1. Hero ── -->
+<section id="hero">
+  <div class="container">
+    <h1 class="hero-title">SapiensOntoCellMap</h1>
+    <p class="hero-tagline">Ontology-Aware Cell Type Annotation for Single-Cell &amp; Spatial Transcriptomics</p>
+    <div class="badges">
+      <span class="badge">Python 3.10+</span>
+      <span class="badge">MIT License</span>
+      <span class="badge">GitHub</span>
+    </div>
+    <div class="cta-group">
+      <a class="btn btn-primary" href="#install">Get Started</a>
+      <a class="btn btn-outline" href="https://github.com/Sonal1510/SapiensOntoCellMap" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn btn-outline" href="sapiens_visualizer.html" target="_blank" rel="noopener">Explore the Database</a>
+      <a class="btn btn-disabled" href="#" data-tooltip="Coming soon" onclick="return false;">Read the Paper</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── 2. What is SapiensOntoCellMap? ── -->
+<section id="what">
+  <div class="container">
+    <div class="section-label">Overview</div>
+    <h2>What is SapiensOntoCellMap?</h2>
+    <div class="what-grid">
+      <div class="what-text">
+        <p>SapiensOntoCellMap annotates cell clusters from single-cell RNA-seq and spatial transcriptomics experiments using a consolidated, ontology-normalized marker database built from 14 curated public sources. Annotation is performed via hypergeometric enrichment testing with Benjamini-Hochberg global FDR correction and evidence-weighted scoring — without requiring a reference atlas or pre-trained model.</p>
+        <p>The key differentiator is Cell Ontology (CL) graph traversal at annotation time. For every significant hit, the tool walks the CL DAG from the matched cell type up to the ontology root, recording confidence at every ancestor level. This yields a hierarchical annotation — from broad lineage (e.g., lymphocyte) down to specific subtype (e.g., CD8-positive, alpha-beta cytotoxic T cell) — in a single enrichment run. Supported inputs include Seurat, Scanpy, SpaceRanger/CellRanger, Atera, and any generic CSV.</p>
+        <div class="platform-strip">
+          <span class="platform-label">Platforms:</span>
+          <span class="chip">scRNA-seq</span>
+          <span class="chip">Visium</span>
+          <span class="chip">Xenium</span>
+          <span class="chip">Atera</span>
+          <span class="chip">Generic CSV</span>
+        </div>
+      </div>
+      <div class="what-stats">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-number">14</div>
+            <div class="stat-label">Databases integrated</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">442K</div>
+            <div class="stat-label">Marker associations</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">1,208</div>
+            <div class="stat-label">Cell types</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">266</div>
+            <div class="stat-label">Tissues</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 3. Why SapiensOntoCellMap? ── -->
+<section id="why">
+  <div class="container">
+    <div class="section-label">Competitive Landscape</div>
+    <h2>The gap it fills</h2>
+    <p>Existing tools either require a reference atlas, lack spatial support, or give only a single flat label. SapiensOntoCellMap is the first open-source tool to deliver ontology-aware hierarchical annotation for both scRNA-seq and spatial data without a reference atlas.</p>
+    <div class="comparison-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th>Ontology-aware</th>
+            <th>No reference atlas needed</th>
+            <th>Spatial support</th>
+            <th>Hierarchical output</th>
+            <th>Open-source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight-row">
+            <td>SapiensOntoCellMap</td>
+            <td>&#x2705; CL DAG traversal</td>
+            <td>&#x2705;</td>
+            <td>&#x2705; All platforms</td>
+            <td>&#x2705; Broad &#x2192; subtype</td>
+            <td>&#x2705;</td>
+          </tr>
+          <tr>
+            <td>OnClass</td>
+            <td>&#x2705; embeddings</td>
+            <td>&#x274C; needs reference</td>
+            <td>&#x274C;</td>
+            <td>&#x274C; single label</td>
+            <td>&#x2705;</td>
+          </tr>
+          <tr>
+            <td>CellO</td>
+            <td>&#x2705; hierarchical</td>
+            <td>&#x274C; needs reference</td>
+            <td>&#x274C;</td>
+            <td>&#x26A0;&#xFE0F; partial</td>
+            <td>&#x2705;</td>
+          </tr>
+          <tr>
+            <td>scType</td>
+            <td>&#x274C;</td>
+            <td>&#x2705;</td>
+            <td>&#x26A0;&#xFE0F; limited</td>
+            <td>&#x274C;</td>
+            <td>&#x2705;</td>
+          </tr>
+          <tr>
+            <td>Manual curation</td>
+            <td>&#x274C;</td>
+            <td>&#x2705;</td>
+            <td>&#x2705;</td>
+            <td>&#x274C;</td>
+            <td>N/A</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <strong>Key insight:</strong> CL DAG traversal gives you broad lineage AND specific subtype confidence in a single enrichment run — no re-running, no re-training.
+    </div>
+  </div>
+</section>
+
+<!-- ── 4. How it works ── -->
+<section id="how">
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2>How it works</h2>
+    <div class="phase-grid">
+      <div class="phase-card">
+        <span class="phase-tag">Phase 1</span>
+        <h3>Build the Database (once)</h3>
+        <p>A one-time download and parse of all 14 public marker databases. Genes are normalized using the HGNC alias map. The resulting master database contains 442,000 marker-cell type associations, de-duplicated and evidence-weighted. Run time: ~10-20 minutes.</p>
+      </div>
+      <div class="phase-card">
+        <span class="phase-tag phase2">Phase 2</span>
+        <h3>Annotate Your Data (per experiment)</h3>
+        <p>For each cluster, differentially expressed genes are tested against the marker database using hypergeometric enrichment with BH FDR correction. The CL ontology DAG is then traversed for every significant hit, building a full confidence hierarchy from broad lineage to specific subtype. Output is a self-contained interactive HTML report.</p>
+      </div>
+    </div>
+    <div class="arch-img-wrap">
+      <img src="architecture_diagram.png" alt="SapiensOntoCellMap pipeline architecture diagram showing Phase 1 database construction and Phase 2 annotation workflow" loading="eager" decoding="async" />
+      <p class="arch-caption">Figure 1. SapiensOntoCellMap pipeline. Phase 1 (left): one-time marker database construction from 14 curated sources. Phase 2 (right): per-experiment cell type annotation via weighted enrichment testing and CL ontology traversal.</p>
+    </div>
+    <div class="accordion">
+      <div class="accordion-item">
+        <button class="accordion-btn" onclick="toggleAccordion(this)">
+          Statistical method: hypergeometric + BH FDR + weighted enrichment
+          <span class="chevron">&#9660;</span>
+        </button>
+        <div class="accordion-body">
+          <p>For each cluster <em>i</em> and cell type <em>c</em>, SapiensOntoCellMap tests whether the overlap between cluster DEGs and the cell type's reference markers is greater than expected by chance. The p-value is calculated from the hypergeometric distribution (one-sided, P(X &ge; k)) and corrected globally across all cluster &times; cell type pairs using Benjamini-Hochberg FDR.</p>
+          <p>Evidence weighting assigns per-gene weights based on source type: Experiment (1.0) &gt; Single-Cell Sequencing (0.9) &gt; Company (0.8) &gt; Literature (0.7) &gt; Review (0.6) &gt; Computational (0.5). The <code>Combined_Score = Weighted_Enrichment &times; -log10(adj_p)</code> ranks candidates without inflating statistical tests.</p>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <button class="accordion-btn" onclick="toggleAccordion(this)">
+          CL ontology traversal: broad lineage to specific subtype
+          <span class="chevron">&#9660;</span>
+        </button>
+        <div class="accordion-body">
+          <p>After enrichment testing, each significant cell type hit is looked up in the Cell Ontology (CL) DAG. The tool walks all ancestor paths from the matched node to the ontology root (<code>CL:0000000</code>), recording the confidence score at every ancestor level. This produces the Hierarchy tab: an icicle chart where each row is a CL depth level, and color intensity encodes how strongly each ancestor is supported by the cluster's DEGs.</p>
+          <p>This traversal requires no reference atlas — it only needs the CL ontology file (downloaded automatically) and the enrichment scores computed in Phase 2.</p>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <button class="accordion-btn" onclick="toggleAccordion(this)">
+          Composition scoring: annotation-derived cell type proportions
+          <span class="chevron">&#9660;</span>
+        </button>
+        <div class="accordion-body">
+          <p>After CL ancestor pruning (removing redundant ancestor nodes and obsolete CL terms), the <code>Combined_Score</code> values for leaf-level cell types are normalized to sum to 1.0 per cluster, yielding annotation-derived composition scores. These are output as <code>*_composition_scores.csv</code> and visualized as a stacked bar chart in the Composition tab of the HTML report.</p>
+          <p>This approach does not require a raw expression matrix — it works directly from DEG-based enrichment results, making it applicable to both scRNA-seq and spatial data.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 5. Benchmarking ── -->
+<section id="results">
+  <div class="container">
+    <div class="section-label">Benchmarking</div>
+    <h2>Validated on Public Datasets</h2>
+    <p>Accuracy was evaluated on two publicly available datasets with established ground-truth labels, covering both single-cell and spatial transcriptomics modalities.</p>
+    <div class="bench-grid">
+      <div class="bench-card">
+        <h3>PBMC3k</h3>
+        <div class="bench-meta">10x Chromium scRNA-seq (CellRanger 1.1.0) &middot; 8 clusters &middot; Seurat tutorial labels</div>
+        <div class="accuracy-badge">87.5%</div>
+        <div class="bench-figure">
+          <img src="pbmc3k_comparison.png" alt="PBMC3k benchmarking comparison: SapiensOntoCellMap annotations vs Seurat tutorial ground truth labels across 8 clusters" loading="lazy" decoding="async" />
+        </div>
+        <a class="reproduce-btn" href="https://github.com/Sonal1510/SapiensOntoCellMap/tree/main/benchmarking" target="_blank" rel="noopener">Reproduce &#8599;</a>
+      </div>
+      <div class="bench-card">
+        <h3>Atera WTA Breast Cancer</h3>
+        <div class="bench-meta">10x Atera whole-transcriptome in situ, FFPE &middot; 34 clusters &middot; 10x Genomics published cell groups</div>
+        <div class="accuracy-badge">85.3%</div>
+        <div class="bench-figure">
+          <img src="atera_breast_cancer_comparison.png" alt="Atera Breast Cancer benchmarking comparison: SapiensOntoCellMap spatial annotations vs 10x Genomics published labels" loading="lazy" decoding="async" />
+        </div>
+        <a class="reproduce-btn" href="https://github.com/Sonal1510/SapiensOntoCellMap/tree/main/benchmarking" target="_blank" rel="noopener">Reproduce &#8599;</a>
+      </div>
+    </div>
+    <p class="accuracy-footnote">Accuracy = fraction of clusters where SapiensOntoCellMap Top_Cell_Type or Broad_Type shares at least one semantic token with the published ground-truth label.</p>
+  </div>
+</section>
+
+<!-- ── 6. Get Started ── -->
+<section id="install">
+  <div class="container">
+    <div class="section-label">Installation</div>
+    <h2>Get Started</h2>
+    <p>Three steps from zero to annotated clusters.</p>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-number">1</div>
+        <h3>Install</h3>
+        <p>Clone the repository and install dependencies.</p>
+        <div class="code-wrap">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code class="language-bash">git clone https://github.com/Sonal1510/SapiensOntoCellMap.git
+cd SapiensOntoCellMap
+pip install -e .</code></pre>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-number">2</div>
+        <h3>Build the Marker Database</h3>
+        <p>One-time setup: downloads and parses all 14 public databases.</p>
+        <div class="code-wrap">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code class="language-bash">python scripts/build_marker_db.py
+# ~10-20 min, downloads 14 public databases</code></pre>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-number">3</div>
+        <h3>Annotate</h3>
+        <p>Run annotation on your DEG file. Works for scRNA-seq, spatial, and generic CSV inputs.</p>
+        <div class="code-wrap">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code class="language-bash">python src/cluster_annotation/get_cluster_annotation.py \
+    my_degs.csv my_experiment results/ \
+    --deg_type scrna</code></pre>
+        </div>
+      </div>
+    </div>
+    <div class="get-started-links">
+      <a class="link-card" href="https://github.com/Sonal1510/SapiensOntoCellMap#readme" target="_blank" rel="noopener">
+        &#x1F4D6; Full Documentation (README)
+      </a>
+      <a class="link-card" href="sapiens_visualizer.html" target="_blank" rel="noopener">
+        &#x1F9EC; Explore the Marker Database
+      </a>
+      <a class="link-card" href="https://github.com/Sonal1510/SapiensOntoCellMap/issues" target="_blank" rel="noopener">
+        &#x1F41B; GitHub Issues
+      </a>
+      <a class="link-card" href="https://github.com/Sonal1510/SapiensOntoCellMap/tree/main/benchmarking" target="_blank" rel="noopener">
+        &#x1F4CA; Benchmarking Guide
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── 7. Cite & Reproduce ── -->
+<section id="cite">
+  <div class="container">
+    <div class="section-label">For Your Peers</div>
+    <h2>Cite &amp; Reproduce</h2>
+    <div class="cite-grid">
+      <!-- BibTeX -->
+      <div class="cite-card">
+        <h3>&#x1F4CB; Cite this tool</h3>
+        <div class="code-wrap">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code class="language-bibtex">@software{sapiensontocellmap2026,
+  author = {Rashmi, Sonal},
+  title  = {{SapiensOntoCellMap}: Ontology-Aware
+            Cell Type Annotation for Single-Cell
+            and Spatial Transcriptomics},
+  year   = {2026},
+  url    = {https://github.com/Sonal1510/
+            SapiensOntoCellMap}
+}</code></pre>
+        </div>
+      </div>
+
+      <!-- Zenodo -->
+      <div class="cite-card">
+        <h3>&#x1F4E6; Get a DOI</h3>
+        <div class="zenodo-note">
+          <strong>Deposit on Zenodo for a citable DOI:</strong> Visit <a href="https://zenodo.org" target="_blank" rel="noopener">zenodo.org</a> &rarr; connect your GitHub repo &rarr; create a release &rarr; a DOI is auto-assigned and minted permanently.
+        </div>
+        <div class="zenodo-badge">
+          <img src="https://zenodo.org/badge/DOI/pending.svg" alt="DOI pending" loading="lazy" />
+        </div>
+      </div>
+
+      <!-- Key databases -->
+      <div class="cite-card full-width-cite">
+        <h3>&#x1F5C2;&#xFE0F; Key Databases Cited</h3>
+        <div class="db-table-wrap">
+          <table class="db-table">
+            <thead>
+              <tr>
+                <th>Database</th>
+                <th>Reference</th>
+                <th>URL / DOI</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>PanglaoDB</td>
+                <td>Franz&eacute;n et al., <em>Database</em> 2019</td>
+                <td><a href="https://panglaodb.se" target="_blank" rel="noopener">panglaodb.se</a></td>
+              </tr>
+              <tr>
+                <td>CellMarker 2.0</td>
+                <td>Zhang et al., <em>NAR</em> 2023</td>
+                <td><a href="http://biocc.hzau.edu.cn/CellMarker" target="_blank" rel="noopener">biocc.hzau.edu.cn/CellMarker</a></td>
+              </tr>
+              <tr>
+                <td>HuBMAP HRA</td>
+                <td>B&ouml;rner et al., <em>Nat Cell Biol</em> 2021</td>
+                <td><a href="https://humanatlas.io" target="_blank" rel="noopener">humanatlas.io</a></td>
+              </tr>
+              <tr>
+                <td>CellxGene</td>
+                <td>Megill et al. 2021</td>
+                <td><a href="https://cellxgene.cziscience.com" target="_blank" rel="noopener">cellxgene.cziscience.com</a></td>
+              </tr>
+              <tr>
+                <td>Cell Ontology (CL)</td>
+                <td>Diehl et al., <em>Genome Biol</em> 2016</td>
+                <td><a href="https://obofoundry.org/ontology/cl" target="_blank" rel="noopener">obofoundry.org/ontology/cl</a></td>
+              </tr>
+              <tr>
+                <td>UBERON</td>
+                <td>Mungall et al., <em>Genome Biol</em> 2012</td>
+                <td><a href="https://obofoundry.org/ontology/uberon" target="_blank" rel="noopener">obofoundry.org/ontology/uberon</a></td>
+              </tr>
+              <tr>
+                <td>HGNC</td>
+                <td>Seal et al., <em>NAR</em> 2023</td>
+                <td><a href="https://genenames.org" target="_blank" rel="noopener">genenames.org</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="stat-methods-link" href="STATISTICAL_METHODS.md" target="_blank" rel="noopener">
+          &#x1F4D0; Full Statistical Methods Documentation
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ── -->
+<footer>
+  <div>SapiensOntoCellMap &mdash; Sonal Rashmi, UCSF, 2026 &nbsp;&middot;&nbsp; <a href="https://github.com/Sonal1510/SapiensOntoCellMap" target="_blank" rel="noopener">GitHub</a></div>
+  <div class="footer-pre">Pre-publication software &mdash; manuscript in preparation</div>
+</footer>
+
+<script>
+  // ── Syntax highlighting ──
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('pre code').forEach(function (el) {
+      hljs.highlightElement(el);
+    });
+  });
+
+  // ── Copy button ──
+  function copyCode(btn) {
+    var pre = btn.closest('.code-wrap').querySelector('pre');
+    var text = pre.innerText || pre.textContent;
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(function () {
+      // Fallback for browsers without clipboard API
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+
+  // ── Accordion ──
+  function toggleAccordion(btn) {
+    var body = btn.nextElementSibling;
+    var isOpen = body.classList.contains('open');
+    // Close all
+    document.querySelectorAll('.accordion-body').forEach(function (b) { b.classList.remove('open'); });
+    document.querySelectorAll('.accordion-btn').forEach(function (b) { b.classList.remove('open'); });
+    // Open clicked if it was closed
+    if (!isOpen) {
+      body.classList.add('open');
+      btn.classList.add('open');
+    }
+  }
+</script>
+
+</body>
+</html>
