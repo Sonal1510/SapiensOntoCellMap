@@ -2,17 +2,20 @@
 """
 SapiensOntoCellMap Benchmarking — Comparison Figure
 =====================================================
-Generates a two-panel publication-quality figure per dataset:
+Generates a publication-quality figure per dataset:
 
-  Panel A — Bubble matrix
-            Ground-truth label (y) × SapiensOntoCellMap Top_Cell_Type (x)
-            Bubble size ∝ sqrt(cell/spot count); colour by lineage.
-            Dashed ring = discordant pairs (no word overlap, n > threshold).
+  Bubble matrix
+    Ground-truth label (y) x SapiensOntoCellMap Top_Cell_Type (x, shown as S1/S2/S3 codes)
+    Bubble size proportional to sqrt(cell/spot count); colour by GT lineage.
+    Dashed ring = discordant pairs (no word overlap, n > threshold).
+    Reference table below matrix: Code -> full SOM label.
+    Lineage colour legend to the right of the matrix.
+    Accuracy badge in top-right corner of the matrix.
 
-  Panel B — Expression dot plot
-            Bonafide marker genes (y) × SOM clusters grouped by cell type (x)
-            Dot size = % expressing; colour = mean log-norm expression (RdPu).
-            Lineage colour bars + labels on the left margin (no overlap).
+  Expression dot plot (Panel B -- only drawn when expression h5 is found)
+    Bonafide marker genes (y) x SOM clusters grouped by cell type (x)
+    Dot size = % expressing; colour = mean log-norm expression (RdPu).
+    Lineage colour bars + labels on the left margin (no overlap).
 
 Prerequisites
 -------------
@@ -36,6 +39,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -51,15 +55,15 @@ _FIGS_DIR    = _BENCH_DIR / "figures"
 matplotlib.rcParams.update({
     "font.family":       "sans-serif",
     "font.sans-serif":   ["Arial", "Helvetica", "DejaVu Sans"],
-    "font.size":         7,
-    "axes.linewidth":    0.6,
+    "font.size":         8,
+    "axes.linewidth":    0.8,
     "xtick.major.width": 0.6,
     "ytick.major.width": 0.6,
     "pdf.fonttype":      42,    # editable text in Illustrator/Inkscape
     "svg.fonttype":      "none",
 })
 
-# ── Palette ────────────────────────────────────────────────────────────────────
+# -- Palette -------------------------------------------------------------------
 P = dict(
     bg_fig   = "#ffffff",
     bg_panel = "#ffffff",
@@ -72,7 +76,7 @@ P = dict(
     c_som    = "#d6604d",   # SOM header bar (red-orange)
 )
 
-# Lineage colours — print-safe, colorbrewer-derived
+# Lineage colours -- print-safe, colorbrewer-derived
 LINEAGE_COLORS = {
     # Tumour / epithelial
     "tumor":         "#d73027",
@@ -109,6 +113,18 @@ LINEAGE_COLORS = {
     "red blood":     "#a50026",
 }
 
+# Grouping of lineage keys into legend categories
+LINEAGE_CATEGORIES = {
+    "Tumor / Epithelial": ["tumor", "invasive", "dcis", "luminal", "myoepithelial",
+                           "apocrine", "keratinocyte", "epithelial"],
+    "Stroma":             ["fibroblast", "caf", "stromal", "pericyte",
+                           "smooth muscle", "endothelial"],
+    "Immune":             ["macrophage", "mononuclear", "monocyte", "myeloid",
+                           "dendritic", "mast", "plasma", "b cell", "t cell",
+                           "lymphocyte", "nk", "neutrophil", "granulocyte"],
+    "Other":              ["melanocyte", "red blood"],
+}
+
 # Bonafide marker genes per lineage (literature-curated, breast cancer + blood)
 BONAFIDE_MARKERS = {
     "Tumor":        ["ERBB2", "ESR1", "MKI67"],
@@ -135,7 +151,7 @@ def _lineage_color(label: str) -> str:
 
 
 def _truncate(s: str, n: int = 28) -> str:
-    return s if len(s) <= n else s[:n - 1] + "…"
+    return s if len(s) <= n else s[:n - 1] + "..."
 
 
 def _style_ax(ax):
@@ -151,13 +167,13 @@ def _style_ax(ax):
     ax.tick_params(colors=P["fg"], labelsize=6.5, length=3, width=0.6)
 
 
-# ── Ground-truth definitions ───────────────────────────────────────────────────
-# Maps SOM cluster label → canonical ground-truth cell type name.
+# -- Ground-truth definitions --------------------------------------------------
+# Maps SOM cluster label -> canonical ground-truth cell type name.
 # These are the Seurat/10x tutorial labels for PBMC3k, and published
 # cell type annotations for the spatial datasets.
 
 GT_PBMC3K = {
-    # CellRanger 1.x kmeans/8_clusters ordering — verified against mean counts in
+    # CellRanger 1.x kmeans/8_clusters ordering -- verified against mean counts in
     # benchmarking/results/pbmc3k/pbmc3k_deg_converted.csv.
     # Keys match summary_df["Cluster"] format ("Cluster N").
     #
@@ -167,22 +183,22 @@ GT_PBMC3K = {
     # C4 label: large mixed T cell blob (naive CD4, memory CD4, CD8 all merged).
     #   CD4 is NOT significantly upregulated vs other clusters (LFC=-92, p=1.0).
     #   Key upregulated genes: CD3D, CD3E, IL7R, CCR7, LEF1, TCF7, CD8A, CD8B.
-    #   → "alpha-beta T cell" is the broadest correct label at this resolution.
+    #   -> "alpha-beta T cell" is the broadest correct label at this resolution.
     #
-    # C5 (1 cell): GP9=16, GP1BA=2, ITGA2B=3, SDPR=44 → megakaryocyte (GP9+ distinguishes)
-    # C6 (10 cells): CLU=8.7, PPBP=46, GP9=3.9 → platelet (CLU dominant, GP9 low)
-    # C7 (1 cell): GP9=0, GP1BA=0, PPBP=22, TMSB4X=10, GNG11=9 → platelet (no megakaryocyte markers)
+    # C5 (1 cell): GP9=16, GP1BA=2, ITGA2B=3, SDPR=44 -> megakaryocyte (GP9+ distinguishes)
+    # C6 (10 cells): CLU=8.7, PPBP=46, GP9=3.9 -> platelet (CLU dominant, GP9 low)
+    # C7 (1 cell): GP9=0, GP1BA=0, PPBP=22, TMSB4X=10, GNG11=9 -> platelet (no megakaryocyte markers)
     "Cluster 1":  "natural killer cell",   # NKG7, GNLY, GZMB, PRF1, FGFBP2
     "Cluster 2":  "CD14-positive monocyte",  # S100A9, S100A8, LYZ, CD14, FCN1
     "Cluster 3":  "B cell",                # CD79A, MS4A1, CD79B, HLA-DQA1, TCL1A
     "Cluster 4":  "alpha-beta T cell",     # CD3D, CD3E, IL7R, CCR7, LEF1, TCF7, CD8A, CD8B
     "Cluster 5":  "megakaryocyte",         # GP9=16, GP1BA=2, ITGA2B=3, SDPR=44, PPBP=36
     "Cluster 6":  "platelet",              # PPBP=46, CLU=8.7, GNG11=10.6, GP9=3.9
-    "Cluster 7":  "platelet",              # PPBP=22, TMSB4X=10, GNG11=9 — GP9=0, GP1BA=0
+    "Cluster 7":  "platelet",              # PPBP=22, TMSB4X=10, GNG11=9 -- GP9=0, GP1BA=0
     "Cluster 8":  "non-classical monocyte",  # FCGR3A=6.4, LST1=15.6, MS4A7, AIF1, CDKN1C
 }
 
-# Atera GT: maps cell_groups.csv "group" label → canonical cell type name for accuracy matching.
+# Atera GT: maps cell_groups.csv "group" label -> canonical cell type name for accuracy matching.
 # "Unassigned" excluded from accuracy calculation (mapped to None).
 GT_ATERA_BREAST_CANCER = {
     "11q13 Invasive Tumor Cells":           "invasive tumor cell",
@@ -217,7 +233,7 @@ DATASET_CONFIGS = {
         "h5_format":      "mtx",
     },
     "atera_breast_cancer": {
-        "display_name":   "Atera WTA Preview — FFPE Human Breast Cancer",
+        "display_name":   "Atera WTA Preview -- FFPE Human Breast Cancer",
         "platform":       "10x Atera (whole-transcriptome in situ, dev preview)",
         "ground_truth":   GT_ATERA_BREAST_CANCER,
         "gt_type":        "barcode",
@@ -232,7 +248,7 @@ DATASET_CONFIGS = {
 }
 
 
-# ── Load SOM results ───────────────────────────────────────────────────────────
+# -- Load SOM results ----------------------------------------------------------
 
 def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Returns (top_summary_df, sig_results_df).
@@ -263,11 +279,11 @@ def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return summary, sig
 
 
-# ── Expression matrix loading ──────────────────────────────────────────────────
+# -- Expression matrix loading -------------------------------------------------
 
 def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, list, list]:
     """
-    Returns (X_lognorm, barcodes, gene_names) where X is cells × genes (dense float32).
+    Returns (X_lognorm, barcodes, gene_names) where X is cells x genes (dense float32).
     Only the bonafide marker gene columns are returned to keep memory low.
     """
     try:
@@ -292,7 +308,7 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
                 X = sp.csc_matrix(
                     (mat["data"][:], mat["indices"][:], mat["indptr"][:]),
                     shape=tuple(mat["shape"][:])
-                ).T.tocsr()  # cells × genes
+                ).T.tocsr()  # cells x genes
             # SpaceRanger h5: /matrix group same structure
             else:
                 raise ValueError(f"Unrecognised h5 structure in {h5_path}")
@@ -307,7 +323,7 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
         mtx_dir  = h5_path.parent
         if h5_format == "mtx_gz":
             with gzip.open(str(h5_path), "rb") as fh:
-                X = sp.csr_matrix(mmread(fh).T)  # cells × genes
+                X = sp.csr_matrix(mmread(fh).T)  # cells x genes
             # barcodes and features are also .gz in 10x MTX gz bundles
             barcodes_f = mtx_dir / "barcodes.tsv.gz"
             features_f = mtx_dir / "features.tsv.gz"
@@ -320,7 +336,7 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
             else:
                 gene_names = [l.strip().split("\t")[1] for l in open(mtx_dir / "features.tsv")]
         else:
-            X        = sp.csr_matrix(mmread(str(h5_path)).T)  # cells × genes
+            X        = sp.csr_matrix(mmread(str(h5_path)).T)  # cells x genes
             genes_f  = mtx_dir / "genes.tsv"
             barcodes_f = mtx_dir / "barcodes.tsv"
             gene_names = [l.strip().split("\t")[1] for l in open(genes_f)]
@@ -344,14 +360,19 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
     return X_norm.toarray(), barcodes, genes_kept
 
 
-# ── Panel A: Bubble matrix ─────────────────────────────────────────────────────
+# -- Panel A: Bubble matrix ----------------------------------------------------
 
 def draw_bubble_matrix(ax, summary_df: pd.DataFrame, ground_truth: dict,
-                       max_cols: int = 20):
+                       max_cols: int = 20, accuracy: float = None):
+    """Draw bubble matrix with short x-axis codes (S1, S2, ...).
+
+    Returns:
+        som_code_map: dict mapping code (e.g. 'S1') -> full SOM label string
+        gt_labels_used: list of GT labels actually plotted (for legend filtering)
+    """
     _style_ax(ax)
 
-    # Build cluster→GT and cluster→SOM maps
-    # summary_df columns: Cluster, Top_Cell_Type (or Cell_Type)
+    # Build cluster->GT and cluster->SOM maps
     ct_col = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
     cluster_to_som = dict(zip(summary_df["Cluster"].astype(str), summary_df[ct_col]))
     cluster_to_gt  = {str(k): v for k, v in ground_truth.items()}
@@ -365,24 +386,31 @@ def draw_bubble_matrix(ax, summary_df: pd.DataFrame, ground_truth: dict,
     if df.empty:
         ax.text(0.5, 0.5, "No matching clusters", transform=ax.transAxes,
                 ha="center", va="center", fontsize=8, color=P["fg_dim"])
-        return
+        return {}, []
 
-    # Count per GT × SOM pair (each cluster = 1 unit)
+    # Count per GT x SOM pair (each cluster = 1 unit)
     ct = df.groupby(["GT", "SOM"]).size().reset_index(name="n")
     gt_order  = ct.groupby("GT")["n"].sum().sort_values(ascending=True).index.tolist()
     som_order = ct.groupby("SOM")["n"].sum().sort_values(ascending=False).index.tolist()[:max_cols]
     ct = ct[ct["SOM"].isin(som_order)]
+
+    # Build short code map: S1, S2, ... in order of som_order
+    som_code_map = {f"S{i+1}": label for i, label in enumerate(som_order)}
+    som_to_code  = {label: f"S{i+1}" for i, label in enumerate(som_order)}
 
     gt_pos  = {v: i for i, v in enumerate(gt_order)}
     som_pos = {v: i for i, v in enumerate(som_order)}
     max_n   = max(ct["n"].max(), 1)
     bubble_scale = 1800
 
+    gt_labels_used = []
     for _, row in ct.iterrows():
         x = som_pos.get(row["SOM"], -1)
         y = gt_pos.get(row["GT"], -1)
         if x < 0 or y < 0:
             continue
+        if row["GT"] not in gt_labels_used:
+            gt_labels_used.append(row["GT"])
         n     = row["n"]
         size  = bubble_scale * (n / max_n) ** 0.5
         color = _lineage_color(row["GT"])
@@ -406,31 +434,182 @@ def draw_bubble_matrix(ax, summary_df: pd.DataFrame, ground_truth: dict,
     for yi in range(len(gt_order)):
         ax.axhline(yi, color=P["grid"], linewidth=0.35, zorder=0)
 
-    # x-axis: SOM labels — truncated, rotated 45°, right-aligned
+    # x-axis: short codes only (S1, S2, ...) -- no rotation needed
     ax.set_xticks(range(len(som_order)))
-    ax.set_xticklabels([_truncate(s, 26) for s in som_order],
-                       rotation=45, ha="right", fontsize=6, color=P["fg"],
-                       style="italic")
+    ax.set_xticklabels([som_to_code[s] for s in som_order],
+                       fontsize=7.5, color=P["fg"])
     ax.set_yticks(range(len(gt_order)))
-    ax.set_yticklabels([_truncate(s, 26) for s in gt_order],
-                       fontsize=6.5, color=P["fg"])
+    ax.set_yticklabels(gt_order, fontsize=7.5, color=P["fg"])
     ax.set_xlim(-0.6, len(som_order) - 0.4)
     ax.set_ylim(-0.6, len(gt_order)  - 0.4)
-    ax.set_xlabel("SapiensOntoCellMap Top_Cell_Type", fontsize=7, color=P["fg"], labelpad=5)
-    ax.set_ylabel("Published ground-truth label", fontsize=7, color=P["fg"], labelpad=5)
+    ax.set_xlabel("SapiensOntoCellMap Annotation (code)", fontsize=8.5,
+                  color=P["fg"], labelpad=5)
+    ax.set_ylabel("Published ground-truth label", fontsize=8.5,
+                  color=P["fg"], labelpad=5)
 
-    # Bubble size legend
+    # Bubble size legend -- top-left corner of the matrix (avoids overlapping bubbles)
     for ln in [1, 3, 5]:
         s = bubble_scale * (ln / max_n) ** 0.5
         ax.scatter([], [], s=s, color="#aaaaaa", edgecolors="white",
                    linewidths=0.4, label=str(ln))
-    ax.legend(title="Cluster count", title_fontsize=5.5, fontsize=5.5,
-              loc="lower right", frameon=True, framealpha=0.9,
+    ax.legend(title="Cluster count", title_fontsize=7, fontsize=7,
+              loc="upper left", frameon=True, framealpha=0.9,
               edgecolor=P["spine"], facecolor=P["bg_panel"],
-              bbox_to_anchor=(1.0, 0.0), bbox_transform=ax.transAxes)
+              bbox_to_anchor=(0.0, 1.0), bbox_transform=ax.transAxes)
+
+    # Accuracy badge -- top-right corner of matrix axes
+    if accuracy is not None:
+        badge_txt = f"Accuracy: {accuracy:.0%}"
+        ax.text(0.98, 0.98, badge_txt,
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=8.5, fontweight="bold", color=P["fg"],
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
+                          edgecolor="#333333", linewidth=0.8))
+
+    return som_code_map, gt_labels_used
 
 
-# ── Panel B: Expression dot plot ───────────────────────────────────────────────
+def draw_reference_table(fig, ax_matrix, som_code_map: dict,
+                         table_top: float, table_height: float,
+                         left: float, right: float):
+    """Draw a code->label reference table in figure coordinates below the matrix.
+
+    Args:
+        fig: matplotlib Figure
+        ax_matrix: the bubble matrix Axes (used to compute left/right bounds)
+        som_code_map: {code: full_label} ordered dict
+        table_top: figure y coordinate for top of the table (0-1)
+        table_height: figure height to allocate for table (0-1)
+        left: figure x coordinate for left edge of table
+        right: figure x coordinate for right edge of table
+    """
+    codes  = list(som_code_map.keys())
+    labels = list(som_code_map.values())
+    n_rows = len(codes)
+    if n_rows == 0:
+        return
+
+    # Create a hidden axes for the table
+    ax_tbl = fig.add_axes([left, table_top - table_height, right - left, table_height])
+    ax_tbl.set_axis_off()
+
+    # Build table data
+    table_data = [[code, label] for code, label in zip(codes, labels)]
+    col_labels = ["Code", "SapiensOntoCellMap Annotation"]
+
+    tbl = ax_tbl.table(
+        cellText=table_data,
+        colLabels=col_labels,
+        loc="upper left",
+        cellLoc="left",
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(7.0)
+
+    # Style header row
+    for col_i in range(2):
+        cell = tbl[0, col_i]
+        cell.set_facecolor("#dddddd")
+        cell.set_text_props(fontweight="bold", color="#1a1a1a", fontsize=7.0)
+        cell.set_edgecolor("#bbbbbb")
+        cell.set_linewidth(0.5)
+
+    # Style data rows with alternating shading
+    for row_i in range(1, n_rows + 1):
+        bg = "#f5f5f5" if row_i % 2 == 1 else "#ffffff"
+        for col_i in range(2):
+            cell = tbl[row_i, col_i]
+            cell.set_facecolor(bg)
+            cell.set_edgecolor("#dddddd")
+            cell.set_linewidth(0.4)
+            cell.set_text_props(fontsize=7.0, color="#1a1a1a")
+
+    # Column widths: code column narrow, label column wide
+    tbl.auto_set_column_width([0, 1])
+    for row_i in range(n_rows + 1):
+        tbl[row_i, 0].set_width(0.07)
+        tbl[row_i, 1].set_width(0.93)
+
+    # Section header text above the table
+    ax_tbl.text(0.0, 1.02,
+                "Reference: SapiensOntoCellMap Annotation Codes",
+                transform=ax_tbl.transAxes,
+                fontsize=7.0, fontweight="bold", color=P["fg_dim"],
+                va="bottom",
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="none",
+                          edgecolor="none"))
+
+
+def draw_lineage_legend(fig, gt_labels_used: list,
+                        legend_left: float, legend_bottom: float,
+                        legend_width: float, legend_height: float):
+    """Draw a color-swatch lineage legend panel to the right of the matrix.
+
+    Only shows lineages that appear in gt_labels_used.
+    """
+    ax_leg = fig.add_axes([legend_left, legend_bottom, legend_width, legend_height])
+    ax_leg.set_axis_off()
+
+    # Determine which lineage keys appear in gt_labels_used
+    gt_labels_lower = [l.lower() for l in gt_labels_used]
+
+    def label_matches_key(key):
+        return any(key in gl for gl in gt_labels_lower)
+
+    # Build legend entries: category header + matching lineages
+    entries = []  # list of (label, color, is_header)
+    for cat_name, keys in LINEAGE_CATEGORIES.items():
+        cat_entries = []
+        for key in keys:
+            if label_matches_key(key):
+                cat_entries.append((key.title(), LINEAGE_COLORS[key]))
+        if cat_entries:
+            entries.append((cat_name, None, True))
+            entries.extend([(lbl, col, False) for lbl, col in cat_entries])
+
+    if not entries:
+        # Fallback: show all used colors
+        seen = set()
+        for gl in gt_labels_used:
+            col = _lineage_color(gl)
+            if col not in seen:
+                seen.add(col)
+                entries.append((gl.title(), col, False))
+
+    n_entries = len(entries)
+    if n_entries == 0:
+        return
+
+    row_h = 1.0 / max(n_entries + 2, 1)
+    y     = 1.0 - row_h * 0.5
+
+    ax_leg.text(0.0, y, "Bubble color = GT lineage",
+                transform=ax_leg.transAxes,
+                fontsize=7, fontweight="bold", color=P["fg"],
+                va="center")
+    y -= row_h
+
+    for label, color, is_header in entries:
+        if is_header:
+            ax_leg.text(0.0, y, label,
+                        transform=ax_leg.transAxes,
+                        fontsize=7, fontweight="bold", color=P["fg_dim"],
+                        va="center", style="italic")
+        else:
+            patch = mpatches.Rectangle((0.0, y - row_h * 0.35),
+                                       0.08, row_h * 0.7,
+                                       transform=ax_leg.transAxes,
+                                       clip_on=False,
+                                       facecolor=color, edgecolor="white",
+                                       linewidth=0.4)
+            ax_leg.add_patch(patch)
+            ax_leg.text(0.12, y, label,
+                        transform=ax_leg.transAxes,
+                        fontsize=7, color=P["fg"], va="center")
+        y -= row_h
+
+
+# -- Panel B: Expression dot plot ----------------------------------------------
 
 def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
                   barcodes: list, genes_in_matrix: list,
@@ -444,7 +623,7 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
     clusters = sorted(cluster_to_som.keys(),
                       key=lambda c: (cluster_to_som.get(c, ""), c))
 
-    # Map barcode → cluster (barcodes have cluster index in CellRanger format)
+    # Map barcode -> cluster (barcodes have cluster index in CellRanger format)
     # For graphclust outputs cluster is in filename; here we assign equally
     n_cells    = X.shape[0]
     n_clusters = len(clusters)
@@ -459,7 +638,7 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
     # Column labels for dot plot
     col_labels = [f"{c}\n{_truncate(cluster_to_som.get(c,'?'), 18)}" for c in clusters]
 
-    # Build gene order from BONAFIDE_MARKERS — only genes present in matrix
+    # Build gene order from BONAFIDE_MARKERS -- only genes present in matrix
     ordered_genes = []
     lineage_spans = {}
     cur = 0
@@ -491,7 +670,7 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
         idxs = [i for i, bc in enumerate(barcodes) if bc_to_cluster.get(bc) == cluster]
         if not idxs:
             continue
-        sub = X[idxs, :]  # cells × bonafide genes
+        sub = X[idxs, :]  # cells x bonafide genes
         for row_i, gene in enumerate(ordered_genes):
             col_j = gene_to_col[gene]
             vals  = sub[:, col_j]
@@ -535,15 +714,15 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
     # Axes
     ax.set_xticks(range(n_cols))
     ax.set_xticklabels(col_labels, rotation=45, ha="right",
-                       fontsize=5.5, color=P["fg"])
+                       fontsize=7, color=P["fg"])
     ax.set_yticks(range(n_genes))
-    ax.set_yticklabels(ordered_genes, fontsize=7, color=P["fg"],
+    ax.set_yticklabels(ordered_genes, fontsize=8, color=P["fg"],
                        fontfamily="monospace")
     ax.set_xlim(-0.6, n_cols - 0.4)
     ax.set_ylim(-0.8, n_genes - 0.2)
     ax.invert_yaxis()
 
-    # Lineage colour bars + labels — left of y-axis, no overlap
+    # Lineage colour bars + labels -- left of y-axis, no overlap
     for lin, (g_start, g_end) in lineage_spans.items():
         lc    = _lineage_color(lin)
         mid   = (g_start + g_end - 1) / 2
@@ -555,7 +734,7 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
                     arrowprops=dict(arrowstyle="-", color=lc, lw=3.0,
                                    shrinkA=0, shrinkB=0), clip_on=False)
         ax.text(-0.04, f_mid, lin, transform=ax.transAxes,
-                ha="right", va="center", fontsize=6.5, color=lc,
+                ha="right", va="center", fontsize=8, color=lc,
                 fontweight="bold", style="italic", clip_on=False)
 
     # Light horizontal gridlines
@@ -583,7 +762,7 @@ def draw_dot_plot(ax, summary_df: pd.DataFrame, X: np.ndarray,
               facecolor=P["bg_panel"])
 
 
-# ── Barcode-level GT join ──────────────────────────────────────────────────────
+# -- Barcode-level GT join -----------------------------------------------------
 
 def build_cluster_gt_from_barcodes(gt_csv: Path, clusters_csv: Path,
                                    gt_label_map: dict,
@@ -596,7 +775,7 @@ def build_cluster_gt_from_barcodes(gt_csv: Path, clusters_csv: Path,
 
     For each cluster, assign the majority GT label (mapped through gt_label_map).
     Labels that map to None in gt_label_map are excluded from majority voting.
-    Returns a dict: "Cluster N" → canonical_gt_label_str.
+    Returns a dict: "Cluster N" -> canonical_gt_label_str.
     """
     gt_df = pd.read_csv(gt_csv)
     cc_df = pd.read_csv(clusters_csv)
@@ -623,7 +802,7 @@ def build_cluster_gt_from_barcodes(gt_csv: Path, clusters_csv: Path,
     return cluster_to_gt
 
 
-# ── Accuracy computation ───────────────────────────────────────────────────────
+# -- Accuracy computation ------------------------------------------------------
 
 def compute_accuracy(summary_df: pd.DataFrame, ground_truth: dict) -> float:
     """
@@ -661,7 +840,7 @@ def compute_accuracy(summary_df: pd.DataFrame, ground_truth: dict) -> float:
     return accuracy
 
 
-# ── Main figure builder ────────────────────────────────────────────────────────
+# -- Main figure builder -------------------------------------------------------
 
 def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
     logger.info(f"\n{'='*60}")
@@ -671,7 +850,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
     summary_df, sig_df = load_som_results(cfg["som_sample"])
     ground_truth = cfg["ground_truth"]
 
-    # For barcode-level GT datasets, build cluster→GT map via majority-vote join
+    # For barcode-level GT datasets, build cluster->GT map via majority-vote join
     if cfg.get("gt_type") == "barcode":
         gt_csv       = cfg.get("gt_csv")
         clusters_csv = cfg.get("clusters_csv",
@@ -686,7 +865,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
             )
         else:
             logger.warning(
-                f"Barcode GT join skipped — missing file(s): "
+                f"Barcode GT join skipped -- missing file(s): "
                 f"gt_csv={gt_csv}, clusters_csv={clusters_csv}"
             )
 
@@ -699,49 +878,110 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
 
     has_expression = Path(h5_path).exists()
     if not has_expression:
-        logger.warning(f"Expression matrix not found at {h5_path} — Panel B will be skipped.")
+        logger.warning(f"Expression matrix not found at {h5_path} -- Panel B will be skipped.")
 
-    # Figure layout
-    fig_w = 20 if has_expression else 9
-    fig = plt.figure(figsize=(fig_w, 10), facecolor="white")
+    # -- Dynamic figure height ------------------------------------------------
+    # Estimate GT row count for bubble matrix sizing
+    n_gt_rows = len({v for v in ground_truth.values() if v is not None})
+    # Estimate SOM columns (up to 20)
+    ct_col = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
+    n_som_cols = min(20, summary_df[ct_col].nunique())
+    # Estimate table rows (= number of unique SOM labels shown)
+    n_table_rows = n_som_cols + 1  # +1 for header
 
+    # Height breakdown (inches):
+    #   title block: 0.6
+    #   matrix: max(3.5, n_gt_rows * 0.35)
+    #   gap: 0.3
+    #   table: n_table_rows * 0.18 + 0.4 (header + padding)
+    #   bottom margin: 0.5
+    matrix_h    = max(3.5, n_gt_rows * 0.35)
+    table_h_in  = n_table_rows * 0.18 + 0.4
+    fig_h       = max(8.0, 0.6 + matrix_h + 0.3 + table_h_in + 0.5)
+    fig_w       = 10.0  # fixed single-panel width
+
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor="white")
+
+    # -- Figure coordinate layout ---------------------------------------------
+    # All values in figure fraction [0, 1].
+    # Legend strip on the right: 14% of width
+    # Matrix: left margin 13%, right edge at 80% (leaving 3% gap + ~17% legend)
+    fig_left   = 0.13   # left margin for matrix (room for GT y-labels)
+    fig_right  = 0.80   # right edge of matrix
+    fig_top    = 1.0 - (0.6 / fig_h)   # below title block
+    fig_top    = min(fig_top, 0.93)
+
+    # Matrix height fraction
+    matrix_frac  = matrix_h / fig_h
+    table_frac   = table_h_in / fig_h
+    bottom_frac  = 0.5 / fig_h
+    gap_frac     = 0.3 / fig_h
+
+    matrix_bottom = fig_top - matrix_frac
+    matrix_bottom = max(matrix_bottom, table_frac + bottom_frac + gap_frac)
+
+    # Legend strip: right of matrix
+    legend_left   = fig_right + 0.03
+    legend_right  = 0.99
+    legend_width  = legend_right - legend_left
+    legend_bottom = matrix_bottom
+    legend_height = matrix_frac
+
+    # Table: below matrix
+    table_top_frac    = matrix_bottom - gap_frac
+    table_bottom_frac = table_top_frac - table_frac
+    table_bottom_frac = max(table_bottom_frac, bottom_frac)
+
+    # Place main axes for bubble matrix
+    ax_a = fig.add_axes([fig_left, matrix_bottom, fig_right - fig_left, matrix_frac])
+
+    # Panel A: Bubble matrix
+    som_code_map, gt_labels_used = draw_bubble_matrix(
+        ax_a, summary_df, ground_truth, accuracy=accuracy
+    )
+    # Panel letter
+    ax_a.text(-0.12, 1.05, "a", transform=ax_a.transAxes,
+              fontsize=12, fontweight="bold", color=P["fg"], va="top")
+
+    # Reference table below the matrix
+    draw_reference_table(
+        fig, ax_a, som_code_map,
+        table_top=table_top_frac,
+        table_height=table_frac,
+        left=fig_left,
+        right=fig_right,
+    )
+
+    # Lineage colour legend to the right of the matrix
+    draw_lineage_legend(
+        fig, gt_labels_used,
+        legend_left=legend_left,
+        legend_bottom=legend_bottom,
+        legend_width=legend_width,
+        legend_height=legend_height,
+    )
+
+    # Panel B -- expression dot plot (only when h5 found)
     if has_expression:
-        gs = gridspec.GridSpec(
-            1, 2, figure=fig,
-            left=0.07, right=0.89, top=0.88, bottom=0.24,
-            wspace=0.38, width_ratios=[1.0, 1.7],
-        )
-        ax_a = fig.add_subplot(gs[0, 0])
-        ax_b = fig.add_subplot(gs[0, 1])
-    else:
-        gs = gridspec.GridSpec(
-            1, 1, figure=fig,
-            left=0.12, right=0.88, top=0.88, bottom=0.24,
-        )
-        ax_a = fig.add_subplot(gs[0, 0])
-        ax_b = None
-
-    # Panel A
-    draw_bubble_matrix(ax_a, summary_df, ground_truth)
-    ax_a.text(-0.18, 1.05, "a", transform=ax_a.transAxes,
-              fontsize=11, fontweight="bold", color=P["fg"], va="top")
-
-    # Panel B
-    if has_expression and ax_b is not None:
         logger.info("Loading expression matrix ...")
         X, barcodes, genes_in_matrix = load_expression_matrix(h5_path, h5_format)
-        logger.info(f"  {X.shape[0]:,} cells × {X.shape[1]} bonafide genes")
+        logger.info(f"  {X.shape[0]:,} cells x {X.shape[1]} bonafide genes")
+        # Panel B shares the same figure -- placed below table for completeness
+        dot_bottom = max(0.02, table_bottom_frac - 0.02 - matrix_frac * 0.9)
+        ax_b = fig.add_axes([fig_left, dot_bottom, fig_right - fig_left, matrix_frac * 0.9])
         draw_dot_plot(ax_b, summary_df, X, barcodes, genes_in_matrix, ground_truth)
-        ax_b.text(-0.22, 1.04, "b", transform=ax_b.transAxes,
-                  fontsize=11, fontweight="bold", color=P["fg"], va="top")
+        ax_b.text(-0.12, 1.04, "b", transform=ax_b.transAxes,
+                  fontsize=12, fontweight="bold", color=P["fg"], va="top")
 
-    # Title
-    fig.text(0.5, 0.94, cfg["display_name"],
+    # -- Title block ----------------------------------------------------------
+    title_y = min(fig_top + 0.04, 0.97)
+    fig.text(0.5, title_y, cfg["display_name"],
              ha="center", va="top", fontsize=9, fontweight="bold", color=P["fg"])
-    fig.text(0.5, 0.915,
+    fig.text(0.5, title_y - 0.035,
              f"{cfg['platform']} | SapiensOntoCellMap (marker enrichment + CL ontology)",
              ha="center", va="top", fontsize=6.5, color=P["fg_dim"])
 
+    # -- Save -----------------------------------------------------------------
     _FIGS_DIR.mkdir(parents=True, exist_ok=True)
     out_png = _FIGS_DIR / f"{dataset_key}_comparison.png"
     out_pdf = _FIGS_DIR / f"{dataset_key}_comparison.pdf"
@@ -752,10 +992,11 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
 
     logger.info(f"Saved: {out_png}")
     logger.info(f"Saved: {out_pdf}")
+    logger.info(f"Figure dimensions: {fig_w:.1f} x {fig_h:.1f} inches @ {dpi} DPI")
     return out_png
 
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
+# -- CLI -----------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

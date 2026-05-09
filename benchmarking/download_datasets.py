@@ -59,16 +59,24 @@ DATASETS = {
     },
 
     "atera_breast_cancer": {
-        "name": "Atera WTA Preview — FFPE Human Breast Cancer (10x Genomics dev preview)",
+        "name": "Atera WTA Preview — FFPE Human Breast Cancer",
         "platform": "Atera (10x Genomics, whole-transcriptome in situ)",
         "tissue": "Breast cancer (FFPE)",
-        "source": "https://s3-us-west-2.amazonaws.com/10x.files/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_outs.zip",
-        "note": (
-            "Data manually downloaded from S3 and stored on NAS at "
-            "/Volumes/shainlab/Sonal/sapiensontocellmap_atera/. "
-            "Will be deposited on Zenodo. Not auto-downloadable."
-        ),
-        "files": [],
+        "source": "https://www.10xgenomics.com/datasets/wta-preview-ffpe-human-breast-cancer-1-standard",
+        "files": [
+            {
+                "url": "https://s3-us-west-2.amazonaws.com/10x.files/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_outs.zip",
+                "filename": "WTA_Preview_FFPE_Breast_Cancer_outs.zip",
+                "extract": True,
+                "description": "Atera WTA outs bundle (analysis, cell_feature_matrix, etc.)",
+            },
+            {
+                "url": "https://cf.10xgenomics.com/samples/atera/dev/WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv",
+                "filename": "WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv",
+                "extract": False,
+                "description": "Published cell type annotations (GT labels, 20 cell types)",
+            },
+        ],
     },
 }
 

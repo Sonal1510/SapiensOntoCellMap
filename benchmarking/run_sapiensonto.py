@@ -7,13 +7,13 @@ Runs SapiensOntoCellMap on the benchmark datasets.
 Datasets
 --------
 1. PBMC3k              — scRNA-seq  | DEG: CellRanger kmeans/8_clusters CSV (no graphclust in v1.1.0)
-2. Atera Breast Cancer — Atera WTA  | DEG: pre-computed graphclust CSV from NAS analysis.tar.gz
-                                       GT:  cell_groups.csv from NAS (per-barcode, 20 cell types)
+2. Atera Breast Cancer — Atera WTA  | DEG: pre-computed graphclust CSV from local analysis.tar.gz
+                                       GT:  cell_groups.csv downloaded by download_datasets.py
 
 Prerequisites
 -------------
-    python benchmarking/download_datasets.py --datasets pbmc3k   # PBMC3k only
-    # Atera reads directly from NAS — /Volumes/shainlab/Sonal/sapiensontocellmap_atera/
+    python benchmarking/download_datasets.py --datasets pbmc3k
+    python benchmarking/download_datasets.py --datasets atera_breast_cancer
 
 Usage
 -----
@@ -74,49 +74,64 @@ def find_kmeans_deg(data_dir: Path, n_clusters: int = 8) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Atera NAS helpers — extract pre-computed files from analysis.tar.gz
+# Atera local-disk helpers — extract pre-computed files from downloaded data
 # ---------------------------------------------------------------------------
 
-_ATERA_NAS = Path("/Volumes/shainlab/Sonal/sapiensontocellmap_atera")
-
+# Paths inside analysis.tar.gz (unchanged — internal tar structure)
 _ATERA_DEG_TAR_PATH      = "analysis/diffexp/gene_expression_graphclust/differential_expression.csv"
 _ATERA_CLUSTERS_TAR_PATH = "analysis/clustering/gene_expression_graphclust/clusters.csv"
-_ATERA_CELL_GROUPS_URL   = (
-    "https://cf.10xgenomics.com/samples/atera/dev/"
-    "WTA_Preview_FFPE_Breast_Cancer/WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv"
-)
-_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
 
 
-def extract_atera_nas_files(out_dir: Path, skip_existing: bool) -> tuple[Path, Path, Path]:
+def find_atera_analysis_tar(data_dir: Path) -> Path | None:
     """
-    Prepare the three files needed for Atera benchmarking:
-      1. graphclust differential_expression.csv — extracted from NAS analysis.tar.gz
-      2. graphclust clusters.csv               — extracted from NAS analysis.tar.gz
-      3. cell_groups.csv (GT labels)           — downloaded from 10x CF if not cached
+    Walk data_dir (the extracted outs zip directory) looking for analysis.tar.gz.
+    Returns the first match, or None if not found.
+    """
+    for root, _dirs, files in os.walk(data_dir):
+        if "analysis.tar.gz" in files:
+            return Path(root) / "analysis.tar.gz"
+    return None
+
+
+def prepare_atera_files(out_dir: Path, skip_existing: bool) -> tuple[Path, Path, Path]:
+    """
+    Prepare the three files needed for Atera benchmarking from locally downloaded data:
+      1. graphclust differential_expression.csv — extracted from analysis.tar.gz
+      2. graphclust clusters.csv               — extracted from analysis.tar.gz
+      3. cell_groups.csv (GT labels)           — downloaded by download_datasets.py
+
+    Expects download_datasets.py to have already populated:
+      benchmarking/data/atera_breast_cancer/
+        WTA_Preview_FFPE_Breast_Cancer_outs/   (extracted from outs zip)
+          analysis.tar.gz                       (inside the outs bundle)
+        WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv
 
     All outputs are written to out_dir (local results directory).
     Returns (deg_csv, clusters_csv, cell_groups_csv) as local Paths.
     """
     import tarfile
-    import urllib.request
 
-    nas_tar       = _ATERA_NAS / "analysis.tar.gz"
-    deg_dest      = out_dir / "atera_differential_expression.csv"
-    clusters_dest = out_dir / "atera_clusters.csv"
-    cg_dest       = out_dir / "atera_cell_groups.csv"
-
-    if not nas_tar.exists():
-        logger.error(f"NAS file not found: {nas_tar}. Mount /Volumes/shainlab first.")
-        sys.exit(1)
+    atera_data_dir = _DATA_DIR / "atera_breast_cancer"
+    deg_dest       = out_dir / "atera_differential_expression.csv"
+    clusters_dest  = out_dir / "atera_clusters.csv"
+    cg_dest        = out_dir / "atera_cell_groups.csv"
 
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── analysis.tar.gz ──────────────────────────────────────────────────────
+    analysis_tar = find_atera_analysis_tar(atera_data_dir)
+    if analysis_tar is None:
+        logger.error(
+            f"Atera data not found under {atera_data_dir}. "
+            "Run: python benchmarking/download_datasets.py --datasets atera_breast_cancer"
+        )
+        sys.exit(1)
 
     if deg_dest.exists() and skip_existing:
         logger.info(f"Using cached DEG CSV: {deg_dest}")
     else:
-        logger.info(f"Extracting DEG CSV from {nas_tar.name} ...")
-        with tarfile.open(nas_tar, "r:gz") as tf:
+        logger.info(f"Extracting DEG CSV from {analysis_tar} ...")
+        with tarfile.open(analysis_tar, "r:gz") as tf:
             member = tf.getmember(_ATERA_DEG_TAR_PATH)
             with tf.extractfile(member) as src, open(deg_dest, "wb") as dst:
                 dst.write(src.read())
@@ -125,21 +140,27 @@ def extract_atera_nas_files(out_dir: Path, skip_existing: bool) -> tuple[Path, P
     if clusters_dest.exists() and skip_existing:
         logger.info(f"Using cached clusters CSV: {clusters_dest}")
     else:
-        logger.info(f"Extracting clusters CSV from {nas_tar.name} ...")
-        with tarfile.open(nas_tar, "r:gz") as tf:
+        logger.info(f"Extracting clusters CSV from {analysis_tar} ...")
+        with tarfile.open(analysis_tar, "r:gz") as tf:
             member = tf.getmember(_ATERA_CLUSTERS_TAR_PATH)
             with tf.extractfile(member) as src, open(clusters_dest, "wb") as dst:
                 dst.write(src.read())
         logger.info(f"  Saved: {clusters_dest}")
 
+    # ── cell_groups.csv (GT labels) ──────────────────────────────────────────
+    cg_src = atera_data_dir / "WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv"
     if cg_dest.exists() and skip_existing:
         logger.info(f"Using cached cell_groups CSV: {cg_dest}")
     else:
-        logger.info(f"Downloading cell_groups.csv from 10x CF ...")
-        req = urllib.request.Request(_ATERA_CELL_GROUPS_URL, headers=_HEADERS)
-        with urllib.request.urlopen(req) as resp, open(cg_dest, "wb") as dst:
-            dst.write(resp.read())
-        logger.info(f"  Saved: {cg_dest}")
+        if not cg_src.exists():
+            logger.error(
+                f"cell_groups.csv not found at {cg_src}. "
+                "Run: python benchmarking/download_datasets.py --datasets atera_breast_cancer"
+            )
+            sys.exit(1)
+        import shutil
+        shutil.copy2(cg_src, cg_dest)
+        logger.info(f"  Copied: {cg_dest}")
 
     return deg_dest, clusters_dest, cg_dest
 
@@ -266,7 +287,7 @@ def run_pbmc3k(skip_existing: bool) -> None:
 
 def run_atera_breast_cancer(skip_existing: bool) -> None:
     out_dir = _RESULTS_DIR / "atera_breast_cancer"
-    deg_csv, clusters_csv, cell_groups_csv = extract_atera_nas_files(out_dir, skip_existing)
+    deg_csv, clusters_csv, cell_groups_csv = prepare_atera_files(out_dir, skip_existing)
 
     run_annotation(
         sample_name="atera_breast_cancer",
