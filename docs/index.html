@@ -163,6 +163,38 @@
       text-decoration: none;
       transform: translateY(-1px);
     }
+    /* ── Sparkle button ── */
+    .btn-sparkle {
+      position: relative;
+      overflow: visible;
+    }
+    .btn-sparkle::before,
+    .btn-sparkle::after {
+      content: '✦';
+      position: absolute;
+      font-size: 10px;
+      color: rgba(255,255,255,0.85);
+      pointer-events: none;
+      animation: sparkle-drift 2.8s ease-in-out infinite;
+    }
+    .btn-sparkle::before {
+      top: -7px;
+      right: 10px;
+      animation-delay: 0s;
+    }
+    .btn-sparkle::after {
+      bottom: -7px;
+      left: 12px;
+      font-size: 7px;
+      animation-delay: 1.4s;
+    }
+    @keyframes sparkle-drift {
+      0%   { opacity: 0;    transform: translateY(0)    scale(0.6); }
+      30%  { opacity: 1;    transform: translateY(-3px) scale(1);   }
+      60%  { opacity: 0.6;  transform: translateY(-5px) scale(0.9); }
+      100% { opacity: 0;    transform: translateY(-8px) scale(0.5); }
+    }
+
     .btn-disabled {
       background: rgba(255,255,255,0.12);
       color: rgba(255,255,255,0.45);
@@ -661,7 +693,7 @@
     <div class="cta-group">
       <a class="btn btn-primary" href="#install">Get Started</a>
       <a class="btn btn-outline" href="https://github.com/Sonal1510/SapiensOntoCellMap" target="_blank" rel="noopener">View on GitHub</a>
-      <a class="btn btn-outline" href="sapiens_visualizer.html" target="_blank" rel="noopener">Explore the Database</a>
+      <a class="btn btn-outline btn-sparkle" href="sapiens_visualizer.html" target="_blank" rel="noopener">Explore the Database</a>
     </div>
   </div>
 </section>
