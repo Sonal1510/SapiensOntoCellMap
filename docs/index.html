@@ -785,7 +785,8 @@
       <div class="phase-card">
         <span class="phase-tag">Phase 1</span>
         <h3>Build the Database (once)</h3>
-        <p>A one-time download and parse of all 14 public marker databases. Genes are normalized using the HGNC alias map. The resulting master database contains 442,000 marker-cell type associations, de-duplicated and evidence-weighted. Run time: ~10-20 minutes.</p>
+        <p>A one-time download and parse of 14 public marker databases. Genes are normalized via the HGNC alias map. The resulting master database contains 442,000 marker–cell type associations, de-duplicated and evidence-weighted. Run time: ~10–20 minutes.</p>
+        <p><strong>Flexible updates:</strong> add any new source by dropping in a CSV and one config entry, then re-running <code>DatabaseCreate</code>. Existing annotations are unaffected; new cell types are auto-integrated. No rebuild of prior results required.</p>
       </div>
       <div class="phase-card">
         <span class="phase-tag phase2">Phase 2</span>
@@ -795,7 +796,7 @@
     </div>
     <div class="arch-img-wrap">
       <img src="architecture_diagram.png" alt="SapiensOntoCellMap pipeline architecture diagram showing Phase 1 database construction and Phase 2 annotation workflow" loading="eager" decoding="async" />
-      <p class="arch-caption">Figure 1. SapiensOntoCellMap pipeline. Phase 1 (left): one-time marker database construction from 14 curated sources. Phase 2 (right): per-experiment cell type annotation via weighted enrichment testing and CL ontology traversal.</p>
+      <p class="arch-caption">Figure 1. SapiensOntoCellMap pipeline. Phase 1 (left): one-time marker database construction from 14 curated sources, with flexible update support — add any new source via a CSV and one config entry. Phase 2 (right): per-experiment cell type annotation via weighted enrichment testing and CL ontology traversal.</p>
     </div>
     <div class="accordion">
       <div class="accordion-item">
