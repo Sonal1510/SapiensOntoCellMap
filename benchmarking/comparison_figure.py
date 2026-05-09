@@ -72,9 +72,14 @@ P = dict(
     fg_dim   = "#666677",
     grid     = "#e8e8ee",
     spine    = "#cccccc",
-    c_gt     = "#2166ac",   # ground-truth header bar (blue)
-    c_som    = "#d6604d",   # SOM header bar (red-orange)
+    c_gt     = "#2166ac",
+    c_som    = "#d6604d",
 )
+
+# Match-quality colors (the only colors used for bubbles)
+C_EXACT   = "#2e7d32"   # dark green  — word-level match
+C_PARTIAL = "#f9a825"   # amber       — correct broad type, wrong specific
+C_MISS    = "#c62828"   # deep red    — completely wrong
 
 # Lineage colours -- print-safe, colorbrewer-derived
 LINEAGE_COLORS = {
@@ -152,6 +157,38 @@ def _lineage_color(label: str) -> str:
 
 def _truncate(s: str, n: int = 28) -> str:
     return s if len(s) <= n else s[:n - 1] + "..."
+
+
+# -- Smart label shortening ----------------------------------------------------
+_STRIP_SUFFIXES = [
+    ", CD19-positive", ", CD56-dim", ", alpha-beta", " of vascular tree",
+    " of mammary gland", ", CD14-positive", " CD14-positive, ",
+    " progenitor cell", " epithelial cell", "branched duct ",
+    "double-positive, ", "elicited ", "activated ",
+    "-positive, alpha-beta", " cell, CD19-positive",
+]
+_STRIP_PREFIXES = [
+    "CD16-positive, CD56-dim ",
+]
+
+
+def _smart_truncate(s: str, n: int = 26) -> str:
+    label = s
+    for sfx in _STRIP_SUFFIXES:
+        label = label.replace(sfx, "")
+    for pfx in _STRIP_PREFIXES:
+        if label.startswith(pfx):
+            label = label[len(pfx):]
+    label = label.strip().rstrip(",").strip()
+    return label if len(label) <= n else label[:n - 1] + "…"
+
+
+# -- Concordance check ---------------------------------------------------------
+def _is_concordant(gt: str, som: str) -> bool:
+    gt_tok  = set(gt.lower().replace("-", " ").replace("+", " ").split())
+    som_tok = set(som.lower().replace("-", " ").replace("+", " ").split())
+    stopwords = {"cell", "positive", "negative", "type", "of", "and", "the", "a"}
+    return bool((gt_tok - stopwords) & (som_tok - stopwords))
 
 
 def _style_ax(ax):
@@ -250,12 +287,15 @@ DATASET_CONFIGS = {
 
 # -- Load SOM results ----------------------------------------------------------
 
-def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (top_summary_df, sig_results_df).
+def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, set]]:
+    """Returns (top_summary_df, sig_results_df, cluster_lineage_sets).
+
+    cluster_lineage_sets: maps cluster string → set of normalised Cell_Type tokens
+    from the hierarchical CSV — used for lineage-aware partial-match detection.
 
     Handles two possible output directory layouts:
       - results/<sample>/<sample>_top_annotation_summary.csv  (flat)
-      - results/<sample>/<sample>/<sample>_top_annotation_summary.csv (nested, from run_annotation)
+      - results/<sample>/<sample>/<sample>_top_annotation_summary.csv (nested)
     """
     sample_dir_flat   = _RESULTS_DIR / sample_name
     sample_dir_nested = _RESULTS_DIR / sample_name / sample_name
@@ -273,10 +313,27 @@ def load_som_results(sample_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         logger.error("Run: python benchmarking/run_sapiensonto.py first.")
         sys.exit(1)
 
-    sig_path = sample_dir / f"{sample_name}_all_tissue_level2_sig_results.csv"
     summary = pd.read_csv(summary_path)
-    sig = pd.read_csv(sig_path) if sig_path.exists() else pd.DataFrame()
-    return summary, sig
+    sig_path = sample_dir / f"{sample_name}_all_tissue_level2_sig_results.csv"
+    sig      = pd.read_csv(sig_path) if sig_path.exists() else pd.DataFrame()
+
+    # Build per-cluster set of all Cell_Type tokens from the hierarchical CSV
+    hier_path = sample_dir / f"{sample_name}_all_tissue_level2_hierarchical.csv"
+    cluster_lineage: dict[str, set] = {}
+    if hier_path.exists():
+        hier = pd.read_csv(hier_path)
+        stop = {"cell", "positive", "negative", "type", "of", "and", "the",
+                "a", "human", "cd", "lineage", "obsolete"}
+        for cluster, grp in hier.groupby("Cluster"):
+            tokens: set[str] = set()
+            for ct in grp["Cell_Type"].dropna():
+                if "obsolete" in ct.lower():
+                    continue
+                toks = set(ct.lower().replace("-", " ").replace("+", " ").split())
+                tokens |= (toks - stop)
+            cluster_lineage[str(cluster)] = tokens
+
+    return summary, sig, cluster_lineage
 
 
 # -- Expression matrix loading -------------------------------------------------
@@ -362,251 +419,253 @@ def load_expression_matrix(h5_path: Path, h5_format: str) -> tuple[np.ndarray, l
 
 # -- Panel A: Bubble matrix ----------------------------------------------------
 
-def draw_bubble_matrix(ax, summary_df: pd.DataFrame, ground_truth: dict,
-                       max_cols: int = 20, accuracy: float = None):
-    """Draw bubble matrix with short x-axis codes (S1, S2, ...).
+def _match_quality(gt: str, som: str, broad: str,
+                   lineage_tokens: set | None = None) -> str:
+    """Return 'exact', 'partial', or 'miss'.
 
-    Returns:
-        som_code_map: dict mapping code (e.g. 'S1') -> full SOM label string
-        gt_labels_used: list of GT labels actually plotted (for legend filtering)
+    exact   — GT and SOM share a meaningful word token (direct label match)
+    partial — no direct word overlap BUT any of:
+                • SOM Broad_Type shares tokens with GT
+                • GT tokens appear anywhere in the CL hierarchical lineage
+                  of the cluster (i.e. GT is an ancestor or related node in
+                  the CL DAG that scored for that cluster)
+    miss    — neither
     """
-    _style_ax(ax)
+    stop = {"cell", "positive", "negative", "type", "of", "and", "the",
+            "a", "human", "cd", "lineage"}
 
-    # Build cluster->GT and cluster->SOM maps
-    ct_col = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
-    cluster_to_som = dict(zip(summary_df["Cluster"].astype(str), summary_df[ct_col]))
-    cluster_to_gt  = {str(k): v for k, v in ground_truth.items()}
+    gt_tok  = set(gt.lower().replace("-", " ").replace("+", " ").split()) - stop
+    som_tok = set(som.lower().replace("-", " ").replace("+", " ").split()) - stop
+
+    # 1. Direct word-level match
+    if gt_tok & som_tok:
+        return "exact"
+
+    # 2. Broad-type match
+    broad_tok = set(str(broad).lower().replace("-", " ").replace("+", " ").split()) - stop
+    if gt_tok & broad_tok:
+        return "partial"
+
+    # 3. Hierarchical lineage match — GT tokens appear in any CL node that
+    #    scored for this cluster in the hierarchical traversal
+    if lineage_tokens and (gt_tok & lineage_tokens):
+        return "partial"
+
+    return "miss"
+
+
+def draw_bubble_matrix(ax, summary_df: pd.DataFrame, ground_truth: dict,
+                       cluster_lineage: dict = None,
+                       max_cols: int = 20, accuracy: float = None,
+                       n_match: int = None, n_total: int = None):
+    """CNS-grade bubble matrix — match-quality color encoding.
+
+    Axes
+    ----
+    X : SapiensOntoCellMap predicted labels (smart-truncated, 45° rotation)
+    Y : Published ground-truth labels (sorted by lineage family for readability)
+
+    Bubbles
+    -------
+    Size   ∝ sqrt(n_clusters / max_n) — standard CNS bubble-plot convention
+    Color  = match quality:
+               GREEN  (#2e7d32) — exact / near-exact match
+               AMBER  (#f9a825) — correct broad cell type, wrong specific label
+               RED    (#c62828) — completely wrong annotation
+    Count  printed in white inside bubbles where n > 1
+
+    Returns BUBBLE_MAX_PT for the key panel.
+    """
+    ax.set_facecolor("#fcfcfc")
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.spines["left"].set_visible(True)
+    ax.spines["bottom"].set_visible(True)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_edgecolor(P["spine"])
+        ax.spines[side].set_linewidth(0.7)
+    ax.tick_params(colors="#212121", labelsize=7.5, length=3, width=0.6)
+
+    ct_col    = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
+    broad_col = "Broad_Type"    if "Broad_Type"    in summary_df.columns else None
+    cluster_to_som   = dict(zip(summary_df["Cluster"].astype(str), summary_df[ct_col]))
+    cluster_to_broad = {}
+    if broad_col:
+        cluster_to_broad = dict(zip(summary_df["Cluster"].astype(str),
+                                    summary_df[broad_col]))
+    cluster_to_gt = {str(k): v for k, v in ground_truth.items()}
 
     rows = []
     for cluster, gt in cluster_to_gt.items():
-        som = cluster_to_som.get(cluster, "Unannotated")
-        rows.append({"cluster": cluster, "GT": gt, "SOM": som})
+        if gt is None:
+            continue
+        som    = cluster_to_som.get(cluster, "Unannotated")
+        broad  = cluster_to_broad.get(cluster, "")
+        ltoks  = (cluster_lineage or {}).get(cluster, set())
+        rows.append({"cluster": cluster, "GT": gt, "SOM": som,
+                     "quality": _match_quality(gt, som, broad, ltoks)})
     df = pd.DataFrame(rows)
 
     if df.empty:
         ax.text(0.5, 0.5, "No matching clusters", transform=ax.transAxes,
                 ha="center", va="center", fontsize=8, color=P["fg_dim"])
-        return {}, []
+        return 1
 
-    # Count per GT x SOM pair (each cluster = 1 unit)
-    ct = df.groupby(["GT", "SOM"]).size().reset_index(name="n")
-    gt_order  = ct.groupby("GT")["n"].sum().sort_values(ascending=True).index.tolist()
-    som_order = ct.groupby("SOM")["n"].sum().sort_values(ascending=False).index.tolist()[:max_cols]
-    ct = ct[ct["SOM"].isin(som_order)]
+    ct_tbl = df.groupby(["GT", "SOM", "quality"]).size().reset_index(name="n")
 
-    # Build short code map: S1, S2, ... in order of som_order
-    som_code_map = {f"S{i+1}": label for i, label in enumerate(som_order)}
-    som_to_code  = {label: f"S{i+1}" for i, label in enumerate(som_order)}
+    # Y order: sort GT labels alphabetically within broad family for readability
+    gt_order  = sorted(ct_tbl["GT"].unique())
+    som_order = (ct_tbl.groupby("SOM")["n"].sum()
+                       .sort_values(ascending=False).index.tolist()[:max_cols])
+    ct_tbl = ct_tbl[ct_tbl["SOM"].isin(som_order)]
 
     gt_pos  = {v: i for i, v in enumerate(gt_order)}
     som_pos = {v: i for i, v in enumerate(som_order)}
-    max_n   = max(ct["n"].max(), 1)
-    bubble_scale = 1800
+    max_n   = max(ct_tbl["n"].max(), 1)
 
-    gt_labels_used = []
-    for _, row in ct.iterrows():
-        x = som_pos.get(row["SOM"], -1)
-        y = gt_pos.get(row["GT"], -1)
-        if x < 0 or y < 0:
+    BUBBLE_MAX_PT = 480   # points² for n == max_n (CNS: ~0.9 grid-unit diameter)
+
+    QUALITY_COLOR = {"exact": C_EXACT, "partial": C_PARTIAL, "miss": C_MISS}
+
+    for _, row in ct_tbl.iterrows():
+        xi = som_pos.get(row["SOM"], -1)
+        yi = gt_pos.get(row["GT"], -1)
+        if xi < 0 or yi < 0:
             continue
-        if row["GT"] not in gt_labels_used:
-            gt_labels_used.append(row["GT"])
-        n     = row["n"]
-        size  = bubble_scale * (n / max_n) ** 0.5
-        color = _lineage_color(row["GT"])
-        ax.scatter(x, y, s=size, color=color, alpha=0.78,
-                   edgecolors="white", linewidths=0.6, zorder=3)
+        n     = int(row["n"])
+        size  = BUBBLE_MAX_PT * (n / max_n) ** 0.5
+        color = QUALITY_COLOR.get(row["quality"], C_MISS)
+
+        ax.scatter(xi, yi, s=size, color=color, alpha=0.88,
+                   edgecolors="white", linewidths=0.5, zorder=3)
         if n > 1:
-            ax.text(x, y, str(n), ha="center", va="center",
+            ax.text(xi, yi, str(n), ha="center", va="center",
                     fontsize=5.5, color="white", fontweight="bold", zorder=4)
 
-        # Dashed ring for discordant pairs
-        gt_tok  = set(row["GT"].lower().split())
-        som_tok = set(row["SOM"].lower().split())
-        if not (gt_tok & som_tok):
-            ax.scatter(x, y, s=size * 1.3, color="none",
-                       edgecolors="#333333", linewidths=0.9,
-                       linestyle=(0, (3, 2)), zorder=5)
+    # Alternating row shading
+    for yi, _ in enumerate(gt_order):
+        shade = "#f4f4f4" if yi % 2 == 0 else "#ffffff"
+        ax.axhspan(yi - 0.5, yi + 0.5, color=shade, zorder=0, linewidth=0)
 
-    # Grid
+    # Subtle grid
     for xi in range(len(som_order)):
-        ax.axvline(xi, color=P["grid"], linewidth=0.35, zorder=0)
+        ax.axvline(xi, color="#e5e5e5", linewidth=0.25, zorder=1)
     for yi in range(len(gt_order)):
-        ax.axhline(yi, color=P["grid"], linewidth=0.35, zorder=0)
+        ax.axhline(yi, color="#e5e5e5", linewidth=0.25, zorder=1)
 
-    # x-axis: short codes only (S1, S2, ...) -- no rotation needed
     ax.set_xticks(range(len(som_order)))
-    ax.set_xticklabels([som_to_code[s] for s in som_order],
-                       fontsize=7.5, color=P["fg"])
+    ax.set_xticklabels([_smart_truncate(s, 26) for s in som_order],
+                       rotation=45, ha="right", fontsize=7.5, color="#212121")
     ax.set_yticks(range(len(gt_order)))
-    ax.set_yticklabels(gt_order, fontsize=7.5, color=P["fg"])
+    ax.set_yticklabels(gt_order, fontsize=8, color="#212121")
     ax.set_xlim(-0.6, len(som_order) - 0.4)
     ax.set_ylim(-0.6, len(gt_order)  - 0.4)
-    ax.set_xlabel("SapiensOntoCellMap Annotation (code)", fontsize=8.5,
-                  color=P["fg"], labelpad=5)
-    ax.set_ylabel("Published ground-truth label", fontsize=8.5,
-                  color=P["fg"], labelpad=5)
+    ax.set_xlabel("SapiensOntoCellMap annotation", fontsize=9,
+                  color=P["fg"], labelpad=7)
+    ax.set_ylabel("Published ground-truth label", fontsize=9,
+                  color=P["fg"], labelpad=6)
 
-    # Bubble size legend -- top-left corner of the matrix (avoids overlapping bubbles)
-    for ln in [1, 3, 5]:
-        s = bubble_scale * (ln / max_n) ** 0.5
-        ax.scatter([], [], s=s, color="#aaaaaa", edgecolors="white",
-                   linewidths=0.4, label=str(ln))
-    ax.legend(title="Cluster count", title_fontsize=7, fontsize=7,
-              loc="upper left", frameon=True, framealpha=0.9,
-              edgecolor=P["spine"], facecolor=P["bg_panel"],
-              bbox_to_anchor=(0.0, 1.0), bbox_transform=ax.transAxes)
-
-    # Accuracy badge -- top-right corner of matrix axes
+    # Accuracy badge
     if accuracy is not None:
-        badge_txt = f"Accuracy: {accuracy:.0%}"
-        ax.text(0.98, 0.98, badge_txt,
+        badge_txt = (f"Accuracy: {accuracy:.1%}  ({n_match}/{n_total} clusters)"
+                     if n_match is not None else f"Accuracy: {accuracy:.1%}")
+        ax.text(0.985, 0.985, badge_txt,
                 transform=ax.transAxes, ha="right", va="top",
-                fontsize=8.5, fontweight="bold", color=P["fg"],
-                bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
-                          edgecolor="#333333", linewidth=0.8))
+                fontsize=8.5, fontweight="bold", color="#1b5e20",
+                bbox=dict(boxstyle="round,pad=0.35", facecolor="#f1f8e9",
+                          edgecolor="#81c784", linewidth=0.8, alpha=0.95))
 
-    return som_code_map, gt_labels_used
+    return BUBBLE_MAX_PT
 
 
-def draw_reference_table(fig, ax_matrix, som_code_map: dict,
-                         table_top: float, table_height: float,
-                         left: float, right: float):
-    """Draw a code->label reference table in figure coordinates below the matrix.
+def draw_key_panel(fig, gt_labels_used: list,
+                   key_left: float, key_bottom: float,
+                   key_width: float, key_height: float,
+                   bubble_max_pt: int = 480,
+                   max_per_row: int = 6):
+    """Clearly demarcated KEY panel below the bubble matrix.
 
-    Args:
-        fig: matplotlib Figure
-        ax_matrix: the bubble matrix Axes (used to compute left/right bounds)
-        som_code_map: {code: full_label} ordered dict
-        table_top: figure y coordinate for top of the table (0-1)
-        table_height: figure height to allocate for table (0-1)
-        left: figure x coordinate for left edge of table
-        right: figure x coordinate for right edge of table
+    Three sections in a single framed box:
+      1. Match-quality color key  (the primary encoding)
+      2. Bubble-size legend       (CNS convention: 25 / 50 / 100% of max)
+      3. How to read note
     """
-    codes  = list(som_code_map.keys())
-    labels = list(som_code_map.values())
-    n_rows = len(codes)
-    if n_rows == 0:
-        return
+    ax_k = fig.add_axes([key_left, key_bottom, key_width, key_height])
+    ax_k.set_facecolor("#f8f9fb")
+    for sp in ax_k.spines.values():
+        sp.set_visible(True)
+        sp.set_edgecolor("#b8bcc8")
+        sp.set_linewidth(0.9)
+    ax_k.set_xlim(0, 1)
+    ax_k.set_ylim(0, 1)
+    ax_k.set_xticks([])
+    ax_k.set_yticks([])
 
-    # Create a hidden axes for the table
-    ax_tbl = fig.add_axes([left, table_top - table_height, right - left, table_height])
-    ax_tbl.set_axis_off()
+    def section_header(x, y, w, h, label, bg="#e4e8f0", fg="#2c3060"):
+        band = mpatches.FancyBboxPatch(
+            (x, y), w, h,
+            boxstyle="round,pad=0.005,rounding_size=0.01",
+            facecolor=bg, edgecolor="#9096b8", linewidth=0.6,
+            transform=ax_k.transAxes, clip_on=False
+        )
+        ax_k.add_patch(band)
+        ax_k.text(x + 0.008, y + h / 2, label,
+                  transform=ax_k.transAxes,
+                  fontsize=7.5, fontweight="bold", color=fg,
+                  va="center", ha="left")
 
-    # Build table data
-    table_data = [[code, label] for code, label in zip(codes, labels)]
-    col_labels = ["Code", "SapiensOntoCellMap Annotation"]
+    # ── 1. Match-quality color key (left ~60%) ────────────────────────────────
+    MQ_X = 0.01
+    MQ_W = 0.57
+    section_header(MQ_X, 0.74, MQ_W, 0.20, "Bubble color  =  annotation match quality")
 
-    tbl = ax_tbl.table(
-        cellText=table_data,
-        colLabels=col_labels,
-        loc="upper left",
-        cellLoc="left",
-    )
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(7.0)
+    mq_items = [
+        (C_EXACT,   "Exact / near-exact match",
+                    "GT and SOM share a key word  (e.g. 'monocyte' in both)"),
+        (C_PARTIAL, "Partial match  (correct broad type)",
+                    "SOM broad type matches GT  (e.g. GT='platelet', SOM broad='blood cell')"),
+        (C_MISS,    "Mismatch",
+                    "No meaningful word overlap at any level"),
+    ]
+    for i, (col, title, desc) in enumerate(mq_items):
+        ey = 0.60 - i * 0.22
+        # Filled circle swatch
+        ax_k.scatter(MQ_X + 0.025, ey, s=90, color=col, alpha=0.90,
+                     edgecolors="white", linewidths=0.5,
+                     transform=ax_k.transAxes, zorder=3)
+        ax_k.text(MQ_X + 0.052, ey + 0.04, title,
+                  transform=ax_k.transAxes,
+                  fontsize=7.5, fontweight="bold", color="#1a1a1a",
+                  va="center", ha="left")
+        ax_k.text(MQ_X + 0.052, ey - 0.07, desc,
+                  transform=ax_k.transAxes,
+                  fontsize=6.5, color="#555566",
+                  va="center", ha="left", style="italic")
 
-    # Style header row
-    for col_i in range(2):
-        cell = tbl[0, col_i]
-        cell.set_facecolor("#dddddd")
-        cell.set_text_props(fontweight="bold", color="#1a1a1a", fontsize=7.0)
-        cell.set_edgecolor("#bbbbbb")
-        cell.set_linewidth(0.5)
+    # ── 2. Bubble-size legend (right upper ~35%) ──────────────────────────────
+    SZ_X = 0.64
+    SZ_W = 0.34
+    section_header(SZ_X, 0.74, SZ_W, 0.20, "Bubble size  =  number of clusters")
 
-    # Style data rows with alternating shading
-    for row_i in range(1, n_rows + 1):
-        bg = "#f5f5f5" if row_i % 2 == 1 else "#ffffff"
-        for col_i in range(2):
-            cell = tbl[row_i, col_i]
-            cell.set_facecolor(bg)
-            cell.set_edgecolor("#dddddd")
-            cell.set_linewidth(0.4)
-            cell.set_text_props(fontsize=7.0, color="#1a1a1a")
+    size_entries = [(1.0, "max"), (0.5, "50%"), (0.25, "25%")]
+    for si, (frac, lbl) in enumerate(size_entries):
+        bx = SZ_X + 0.06 + si * 0.11
+        by = 0.45
+        pt = bubble_max_pt * frac ** 0.5 * 0.32   # rescale for axes units
+        ax_k.scatter(bx, by, s=pt,
+                     color="#888888", alpha=0.75, edgecolors="white", linewidths=0.4,
+                     transform=ax_k.transAxes, zorder=3)
+        ax_k.text(bx, by - 0.16, lbl,
+                  transform=ax_k.transAxes,
+                  fontsize=6.5, color="#444444", ha="center", va="top")
 
-    # Column widths: code column narrow, label column wide
-    tbl.auto_set_column_width([0, 1])
-    for row_i in range(n_rows + 1):
-        tbl[row_i, 0].set_width(0.07)
-        tbl[row_i, 1].set_width(0.93)
-
-    # Section header text above the table
-    ax_tbl.text(0.0, 1.02,
-                "Reference: SapiensOntoCellMap Annotation Codes",
-                transform=ax_tbl.transAxes,
-                fontsize=7.0, fontweight="bold", color=P["fg_dim"],
-                va="bottom",
-                bbox=dict(boxstyle="round,pad=0.15", facecolor="none",
-                          edgecolor="none"))
-
-
-def draw_lineage_legend(fig, gt_labels_used: list,
-                        legend_left: float, legend_bottom: float,
-                        legend_width: float, legend_height: float):
-    """Draw a color-swatch lineage legend panel to the right of the matrix.
-
-    Only shows lineages that appear in gt_labels_used.
-    """
-    ax_leg = fig.add_axes([legend_left, legend_bottom, legend_width, legend_height])
-    ax_leg.set_axis_off()
-
-    # Determine which lineage keys appear in gt_labels_used
-    gt_labels_lower = [l.lower() for l in gt_labels_used]
-
-    def label_matches_key(key):
-        return any(key in gl for gl in gt_labels_lower)
-
-    # Build legend entries: category header + matching lineages
-    entries = []  # list of (label, color, is_header)
-    for cat_name, keys in LINEAGE_CATEGORIES.items():
-        cat_entries = []
-        for key in keys:
-            if label_matches_key(key):
-                cat_entries.append((key.title(), LINEAGE_COLORS[key]))
-        if cat_entries:
-            entries.append((cat_name, None, True))
-            entries.extend([(lbl, col, False) for lbl, col in cat_entries])
-
-    if not entries:
-        # Fallback: show all used colors
-        seen = set()
-        for gl in gt_labels_used:
-            col = _lineage_color(gl)
-            if col not in seen:
-                seen.add(col)
-                entries.append((gl.title(), col, False))
-
-    n_entries = len(entries)
-    if n_entries == 0:
-        return
-
-    row_h = 1.0 / max(n_entries + 2, 1)
-    y     = 1.0 - row_h * 0.5
-
-    ax_leg.text(0.0, y, "Bubble color = GT lineage",
-                transform=ax_leg.transAxes,
-                fontsize=7, fontweight="bold", color=P["fg"],
-                va="center")
-    y -= row_h
-
-    for label, color, is_header in entries:
-        if is_header:
-            ax_leg.text(0.0, y, label,
-                        transform=ax_leg.transAxes,
-                        fontsize=7, fontweight="bold", color=P["fg_dim"],
-                        va="center", style="italic")
-        else:
-            patch = mpatches.Rectangle((0.0, y - row_h * 0.35),
-                                       0.08, row_h * 0.7,
-                                       transform=ax_leg.transAxes,
-                                       clip_on=False,
-                                       facecolor=color, edgecolor="white",
-                                       linewidth=0.4)
-            ax_leg.add_patch(patch)
-            ax_leg.text(0.12, y, label,
-                        transform=ax_leg.transAxes,
-                        fontsize=7, color=P["fg"], va="center")
-        y -= row_h
+    # ── 3. How-to-read blurb (right lower) ───────────────────────────────────
+    note = ("Each bubble = one (GT label, SOM prediction) pair.\n"
+            "Diagonal = perfect agreement. Off-diagonal = disagreement.")
+    ax_k.text(SZ_X + SZ_W / 2, 0.16, note,
+              transform=ax_k.transAxes,
+              fontsize=6.5, color="#555566", ha="center", va="center",
+              style="italic", linespacing=1.5)
 
 
 # -- Panel B: Expression dot plot ----------------------------------------------
@@ -847,7 +906,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
     logger.info(f"Dataset: {cfg['display_name']}")
     logger.info(f"{'='*60}")
 
-    summary_df, sig_df = load_som_results(cfg["som_sample"])
+    summary_df, sig_df, cluster_lineage = load_som_results(cfg["som_sample"])
     ground_truth = cfg["ground_truth"]
 
     # For barcode-level GT datasets, build cluster->GT map via majority-vote join
@@ -873,113 +932,77 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
     accuracy = compute_accuracy(summary_df, ground_truth)
     logger.info(f"Overall accuracy for {dataset_key}: {accuracy:.1%}")
 
-    h5_path   = cfg["h5_path"]
-    h5_format = cfg["h5_format"]
-
-    has_expression = Path(h5_path).exists()
-    if not has_expression:
-        logger.warning(f"Expression matrix not found at {h5_path} -- Panel B will be skipped.")
-
-    # -- Dynamic figure height ------------------------------------------------
-    # Estimate GT row count for bubble matrix sizing
-    n_gt_rows = len({v for v in ground_truth.values() if v is not None})
-    # Estimate SOM columns (up to 20)
+    # Compute n_match / n_total for badge
     ct_col = "Top_Cell_Type" if "Top_Cell_Type" in summary_df.columns else "Cell_Type"
-    n_som_cols = min(20, summary_df[ct_col].nunique())
-    # Estimate table rows (= number of unique SOM labels shown)
-    n_table_rows = n_som_cols + 1  # +1 for header
+    broad_col = "Broad_Type" if "Broad_Type" in summary_df.columns else None
+    cluster_to_som   = dict(zip(summary_df["Cluster"].astype(str), summary_df[ct_col]))
+    cluster_to_broad = {}
+    if broad_col:
+        cluster_to_broad = dict(zip(summary_df["Cluster"].astype(str), summary_df[broad_col]))
+    cluster_to_gt = {str(k): v for k, v in ground_truth.items() if v is not None}
+    n_match = 0
+    n_total = 0
+    for cluster, gt in cluster_to_gt.items():
+        som   = cluster_to_som.get(cluster, "Unannotated")
+        broad = cluster_to_broad.get(cluster, "")
+        gt_tok    = set(gt.lower().replace("-", " ").replace("+", " ").split())
+        som_tok   = set(som.lower().replace("-", " ").replace("+", " ").split())
+        broad_tok = set(str(broad).lower().replace("-", " ").replace("+", " ").split())
+        if bool(gt_tok & som_tok) or bool(gt_tok & broad_tok):
+            n_match += 1
+        n_total += 1
 
-    # Height breakdown (inches):
-    #   title block: 0.6
-    #   matrix: max(3.5, n_gt_rows * 0.35)
-    #   gap: 0.3
-    #   table: n_table_rows * 0.18 + 0.4 (header + padding)
-    #   bottom margin: 0.5
-    matrix_h    = max(3.5, n_gt_rows * 0.35)
-    table_h_in  = n_table_rows * 0.18 + 0.4
-    fig_h       = max(8.0, 0.6 + matrix_h + 0.3 + table_h_in + 0.5)
-    fig_w       = 10.0  # fixed single-panel width
+    # -- Dynamic figure sizing -------------------------------------------------
+    n_gt_rows = len({v for v in ground_truth.values() if v is not None})
+
+    fig_w = 9.0
+    # Key panel height fixed at 1.5 in; matrix gets remaining height
+    key_h_in   = 1.5
+    matrix_h_in = max(4.0, n_gt_rows * 0.38 + 1.8)
+    title_h_in  = 0.5
+    xlab_h_in   = 1.4   # room for rotated x-axis labels
+    fig_h = title_h_in + matrix_h_in + xlab_h_in + key_h_in + 0.3
+
+    # Fractional layout (bottom → top)
+    key_bottom   = 0.02
+    key_frac_h   = key_h_in / fig_h
+    xlab_frac_h  = xlab_h_in / fig_h
+    mat_bottom   = key_bottom + key_frac_h + xlab_frac_h
+    mat_frac_h   = matrix_h_in / fig_h
+    mat_top      = mat_bottom + mat_frac_h
+
+    fig_left  = 0.26
+    fig_right = 0.97
 
     fig = plt.figure(figsize=(fig_w, fig_h), facecolor="white")
 
-    # -- Figure coordinate layout ---------------------------------------------
-    # All values in figure fraction [0, 1].
-    # Legend strip on the right: 14% of width
-    # Matrix: left margin 13%, right edge at 80% (leaving 3% gap + ~17% legend)
-    fig_left   = 0.13   # left margin for matrix (room for GT y-labels)
-    fig_right  = 0.80   # right edge of matrix
-    fig_top    = 1.0 - (0.6 / fig_h)   # below title block
-    fig_top    = min(fig_top, 0.93)
+    ax_a = fig.add_axes([fig_left, mat_bottom,
+                         fig_right - fig_left, mat_frac_h])
 
-    # Matrix height fraction
-    matrix_frac  = matrix_h / fig_h
-    table_frac   = table_h_in / fig_h
-    bottom_frac  = 0.5 / fig_h
-    gap_frac     = 0.3 / fig_h
-
-    matrix_bottom = fig_top - matrix_frac
-    matrix_bottom = max(matrix_bottom, table_frac + bottom_frac + gap_frac)
-
-    # Legend strip: right of matrix
-    legend_left   = fig_right + 0.03
-    legend_right  = 0.99
-    legend_width  = legend_right - legend_left
-    legend_bottom = matrix_bottom
-    legend_height = matrix_frac
-
-    # Table: below matrix
-    table_top_frac    = matrix_bottom - gap_frac
-    table_bottom_frac = table_top_frac - table_frac
-    table_bottom_frac = max(table_bottom_frac, bottom_frac)
-
-    # Place main axes for bubble matrix
-    ax_a = fig.add_axes([fig_left, matrix_bottom, fig_right - fig_left, matrix_frac])
-
-    # Panel A: Bubble matrix
-    som_code_map, gt_labels_used = draw_bubble_matrix(
-        ax_a, summary_df, ground_truth, accuracy=accuracy
-    )
-    # Panel letter
-    ax_a.text(-0.05, 1.06, "a", transform=ax_a.transAxes,
-              fontsize=12, fontweight="bold", color=P["fg"], va="top")
-
-    # Reference table below the matrix
-    draw_reference_table(
-        fig, ax_a, som_code_map,
-        table_top=table_top_frac,
-        table_height=table_frac,
-        left=fig_left,
-        right=fig_right,
+    bubble_max_pt = draw_bubble_matrix(
+        ax_a, summary_df, ground_truth,
+        cluster_lineage=cluster_lineage,
+        accuracy=accuracy, n_match=n_match, n_total=n_total,
     )
 
-    # Lineage colour legend to the right of the matrix
-    draw_lineage_legend(
-        fig, gt_labels_used,
-        legend_left=legend_left,
-        legend_bottom=legend_bottom,
-        legend_width=legend_width,
-        legend_height=legend_height,
+    ax_a.text(-0.08, 1.05, "a", transform=ax_a.transAxes,
+              fontsize=13, fontweight="bold", color=P["fg"], va="top")
+
+    # KEY PANEL — framed, clearly demarcated
+    draw_key_panel(
+        fig, [],
+        key_left=fig_left,
+        key_bottom=key_bottom,
+        key_width=fig_right - fig_left,
+        key_height=key_frac_h,
+        bubble_max_pt=bubble_max_pt,
     )
 
-    # Panel B -- expression dot plot (only when h5 found)
-    if has_expression:
-        logger.info("Loading expression matrix ...")
-        X, barcodes, genes_in_matrix = load_expression_matrix(h5_path, h5_format)
-        logger.info(f"  {X.shape[0]:,} cells x {X.shape[1]} bonafide genes")
-        # Panel B shares the same figure -- placed below table for completeness
-        dot_bottom = max(0.02, table_bottom_frac - 0.02 - matrix_frac * 0.9)
-        ax_b = fig.add_axes([fig_left, dot_bottom, fig_right - fig_left, matrix_frac * 0.9])
-        draw_dot_plot(ax_b, summary_df, X, barcodes, genes_in_matrix, ground_truth)
-        ax_b.text(-0.05, 1.06, "b", transform=ax_b.transAxes,
-                  fontsize=12, fontweight="bold", color=P["fg"], va="top")
-
-    # -- Title block ----------------------------------------------------------
-    title_y = min(fig_top + 0.04, 0.97)
+    # -- Title above matrix ---------------------------------------------------
+    title_y = mat_top + (1.0 - mat_top) * 0.50
     fig.text(0.5, title_y, cfg["display_name"],
-             ha="center", va="top", fontsize=9, fontweight="bold", color=P["fg"])
-    fig.text(0.5, title_y - 0.035,
-             f"{cfg['platform']} | SapiensOntoCellMap (marker enrichment + CL ontology)",
-             ha="center", va="top", fontsize=6.5, color=P["fg_dim"])
+             ha="center", va="center", fontsize=10, fontweight="bold",
+             color=P["fg"])
 
     # -- Save -----------------------------------------------------------------
     _FIGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -992,6 +1015,7 @@ def make_figure(dataset_key: str, cfg: dict, dpi: int) -> Path:
 
     logger.info(f"Saved: {out_png}")
     logger.info(f"Saved: {out_pdf}")
+    logger.info(f"Accuracy: {accuracy:.1%}  ({n_match}/{n_total} clusters)")
     logger.info(f"Figure dimensions: {fig_w:.1f} x {fig_h:.1f} inches @ {dpi} DPI")
     return out_png
 

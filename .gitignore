@@ -29,6 +29,11 @@ processing_status_*.csv
 # --- Benchmarking outputs (go to Zenodo, not repo) ---
 benchmarking/results/
 benchmarking/data/
+benchmarking/figures/*.pdf
+
+# --- Generated / derived docs artifacts ---
+docs/architecture_diagram.pdf
+docs/diagrams/
 
 # --- Tool output directories ---
 SapiensOntoCellMap_out/

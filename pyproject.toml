@@ -64,10 +64,9 @@ nlp = [
 ]
 
 [project.scripts]
-# CLI entry points
-sapiensonto-annotate = "src.cluster_annotation.get_cluster_annotation:main"
-sapiensonto-deconvolve = "src.deconvolution.get_deconvolution:main"
+sapiensonto-annotate  = "src.cluster_annotation.get_cluster_annotation:main"
 sapiensonto-visualize = "src.visualization.db_process:main"
+sapiensonto-build-db  = "scripts.build_marker_db:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "config"]
